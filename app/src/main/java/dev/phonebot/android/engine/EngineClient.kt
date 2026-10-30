@@ -13,11 +13,15 @@ import android.os.Messenger
 import android.os.RemoteException
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import org.json.JSONObject
 
 class EngineClient(private val context: Context) {
     private val mutableState = MutableStateFlow(EngineState())
     val state = mutableState.asStateFlow()
+    private val mutableEvents = MutableSharedFlow<JSONObject>(extraBufferCapacity = 128)
+    val events = mutableEvents.asSharedFlow()
     private var remote: Messenger? = null
     private var bound = false
     private var terminalState: EngineState? = null
@@ -30,6 +34,7 @@ class EngineClient(private val context: Context) {
                 mutableState.value = next.copy(phase = EnginePhase.STOPPING)
             } else mutableState.value = next
         }
+        if (message.what == EngineIpc.EVENT) mutableEvents.tryEmit(JSONObject(message.data.getString("json")!!))
         true
     })
     private val connection = object : ServiceConnection {
@@ -44,7 +49,7 @@ class EngineClient(private val context: Context) {
     }
 
     fun attach() {
-        if (!bound) bound = context.bindService(Intent(context, EngineService::class.java), connection, 0)
+        if (!bound) bound = context.bindService(Intent(context, EngineService::class.java), connection, Context.BIND_AUTO_CREATE)
     }
 
     fun start() {
@@ -59,9 +64,8 @@ class EngineClient(private val context: Context) {
     }
 
     fun probe() = send(JSONObject().put("type", "probe"))
-    fun verify(baseUrl: String, model: String, apiKey: String) = send(
-        JSONObject().put("type", "verify").put("config", JSONObject().put("baseUrl", baseUrl).put("model", model).put("apiKey", apiKey))
-    )
+    fun command(command: JSONObject) = send(command)
+    fun cancel() = send(JSONObject().put("type", "cancel"))
     fun stop() {
         terminalState = EngineState(EnginePhase.STOPPED)
         mutableState.value = mutableState.value.copy(phase = EnginePhase.STOPPING)
@@ -70,23 +74,26 @@ class EngineClient(private val context: Context) {
     }
 
     private fun send(command: JSONObject) {
-        if (!mutableState.value.canRun) return
+        val control = command.optString("type") in setOf("cancel", "tool_result", "resume")
+        if (!mutableState.value.canRun && !control) return
         try {
             checkNotNull(remote) { "Engine is disconnected" }.send(Message.obtain(null, EngineIpc.COMMAND).apply {
                 data = Bundle().apply { putString("json", command.toString()) }
             })
-            mutableState.value = mutableState.value.copy(phase = EnginePhase.RUNNING, detail = "")
+            if (!control) mutableState.value = mutableState.value.copy(phase = EnginePhase.RUNNING, detail = "")
         } catch (error: Exception) { disconnected(error.message ?: "Engine command failed") }
     }
 
     private fun disconnected(reason: String) {
         if (!bound && mutableState.value.canStart) return
-        mutableState.value = terminalState ?: EngineState(EnginePhase.FAILED, reason)
+        val result = terminalState ?: EngineState(EnginePhase.FAILED, reason)
         terminalState = null
         detach()
+        mutableState.value = result
     }
 
     fun detach() {
+        try { remote?.send(Message.obtain(null, EngineIpc.DISCONNECT).apply { replyTo = receiver }) } catch (_: RemoteException) { }
         if (bound) context.unbindService(connection)
         bound = false
         remote = null

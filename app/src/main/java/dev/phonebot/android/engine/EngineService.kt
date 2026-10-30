@@ -21,10 +21,32 @@ import dev.phonebot.android.MainActivity
 import java.io.File
 import java.io.OutputStream
 import org.json.JSONObject
+import dev.phonebot.android.phone.PhoneAccessibilityService
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeout
+import kotlinx.coroutines.CancellationException
+import java.util.UUID
 
 class EngineService : Service() {
     private val handler = Handler(Looper.getMainLooper())
-    private var client: Messenger? = null
+    private val clients = mutableSetOf<Messenger>()
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+    private val vault by lazy { CredentialVault(this) }
+    private var toolJob: Job? = null
+    private var pausedTool: JSONObject? = null
+    private var authPrompt: String? = null
+    private var taskId = ""
+    private var cancelled = false
+    private var taskStart: JSONObject? = null
+    private val taskEvents = mutableListOf<JSONObject>()
+    private var promptEvent: JSONObject? = null
+    private var loginEvent: JSONObject? = null
     private var writer: OutputStream? = null
     private var state = EngineState()
     private var started = false
@@ -32,7 +54,16 @@ class EngineService : Service() {
     private val startupDeadline = Runnable { fail("Engine startup timed out") }
     private val messenger = Messenger(Handler(Looper.getMainLooper()) { message ->
         when (message.what) {
-            EngineIpc.CONNECT -> { client = message.replyTo; publish(state) }
+            EngineIpc.CONNECT -> {
+                clients.add(message.replyTo); publish(state)
+                try {
+                    taskStart?.let { message.replyTo.send(eventMessage(it)) }
+                    taskEvents.forEach { message.replyTo.send(eventMessage(it)) }
+                    loginEvent?.let { message.replyTo.send(eventMessage(it)) }
+                    promptEvent?.let { message.replyTo.send(eventMessage(it)) }
+                } catch (_: RemoteException) { clients.remove(message.replyTo) }
+            }
+            EngineIpc.DISCONNECT -> clients.remove(message.replyTo)
             EngineIpc.COMMAND -> handleCommand(message.data.getString("json").orEmpty())
         }
         true
@@ -102,8 +133,31 @@ class EngineService : Service() {
         try {
             val command = JSONObject(json)
             if (command.getString("type") == "stop") { stopEngine(); return }
+            if (command.getString("type") == "cancel") {
+                cancelled = true; pausedTool = null; authPrompt = null; promptEvent = null; loginEvent = null; toolJob?.cancel(); write(command); return
+            }
+            if (command.getString("type") == "resume") {
+                val pending = pausedTool ?: return
+                pausedTool = null
+                executeTool(pending)
+                return
+            }
+            if (command.getString("type") == "tool_result") {
+                check(command.optString("id") == authPrompt) { "认证步骤已结束" }
+                authPrompt = null
+                promptEvent = null
+                write(command.put("secret", true))
+                return
+            }
             check(state.canRun) { "Engine is not ready" }
-            require(command.getString("type") in setOf("probe", "verify")) { "Unknown command" }
+            require(command.getString("type") in setOf("probe", "verify", "catalog", "login", "logout", "refresh", "task")) { "Unknown command" }
+            cancelled = false
+            taskId = command.optString("taskId").ifEmpty { UUID.randomUUID().toString() }
+            command.put("taskId", taskId)
+            if (command.getString("type") == "task") {
+                taskStart = JSONObject(command.toString()).put("type", "task_open")
+                taskEvents.clear()
+            }
             publish(state.copy(phase = EnginePhase.RUNNING, detail = ""))
             write(command)
         } catch (error: Exception) { publish(state.copy(detail = error.message ?: "Command failed")) }
@@ -117,18 +171,67 @@ class EngineService : Service() {
                 handler.removeCallbacks(startupDeadline)
                 publish(EngineState(EnginePhase.READY, "Node ${event.getString("node")} / Pi ${event.getString("pi")}", Process.myPid()))
             }
-            "tool" -> {
-                val reply = JSONObject().put("type", "tool_result").put("id", event.getString("id"))
-                if (event.getString("name") == "runtime_info") {
-                    reply.put("result", JSONObject().put("platform", "android").put("sdk", Build.VERSION.SDK_INT)
-                        .put("pid", Process.myPid()).put("manufacturer", Build.MANUFACTURER))
-                } else reply.put("error", "Unknown Kotlin tool")
-                write(reply)
-            }
-            "result" -> publish(state.copy(phase = EnginePhase.READY, detail = event.toString()))
-            "error" -> publish(state.copy(phase = EnginePhase.READY, detail = "Error: ${event.getString("message")}"))
+            "tool" -> executeTool(event)
+            "result" -> { publish(state.copy(detail = event.toString())); emit(event) }
+            "error" -> { publish(state.copy(detail = "Error: ${event.getString("message")}")); emit(event) }
+            "idle" -> { toolJob?.cancel(); pausedTool = null; authPrompt = null; promptEvent = null; loginEvent = null; publish(state.copy(phase = EnginePhase.READY)); emit(event) }
             "stopped" -> finish(EngineState(EnginePhase.STOPPED))
+            else -> emit(event)
         }
+    }
+
+    private fun executeTool(event: JSONObject) {
+        val name = event.getString("name")
+        val id = event.getString("id")
+        if (event.optString("taskId") != taskId) return
+        if (cancelled) { write(JSONObject().put("type", "tool_result").put("id", id).put("error", "任务已停止")); return }
+        val params = event.optJSONObject("params") ?: JSONObject()
+        if (name == "auth_prompt") { authPrompt = id; promptEvent = event.put("type", "auth_prompt"); emit(event); return }
+        val internal = name.startsWith("vault_") || name == "runtime_info"
+        val phone = PhoneAccessibilityService.instance
+        if (!internal && (phone == null || !phone.available())) {
+            pausedTool = event
+            emit(JSONObject().put("type", "permission").put("taskId", taskId).put("permission", if (phone == null) "accessibility" else "unlock"))
+            return
+        }
+        toolJob = scope.launch {
+            val reply = JSONObject().put("type", "tool_result").put("id", id)
+            try {
+                val result: Any? = withTimeout(30000) {
+                    when (name) {
+                        "runtime_info" -> JSONObject().put("platform", "android").put("sdk", Build.VERSION.SDK_INT).put("pid", Process.myPid()).put("manufacturer", Build.MANUFACTURER)
+                        "vault_read" -> withContext(Dispatchers.IO) { vault.read(params.getString("provider")) }
+                        "vault_list" -> withContext(Dispatchers.IO) { vault.list() }
+                        "vault_write" -> withContext(Dispatchers.IO) { vault.write(params.getString("provider"), params.getJSONObject("credential")); true }
+                        "vault_delete" -> withContext(Dispatchers.IO) { vault.delete(params.getString("provider")); true }
+                        else -> checkNotNull(phone).execute(name, params)
+                    }
+                }
+                check(!cancelled) { "任务已停止" }
+                reply.put("result", result ?: JSONObject.NULL).put("secret", internal && name == "vault_read")
+            } catch (error: CancellationException) {
+                reply.put("error", if (cancelled) "任务已停止" else "工具执行超时")
+            } catch (error: Exception) { reply.put("error", error.message ?: "工具执行失败") }
+            if (!closing) write(reply)
+        }
+    }
+
+    private fun emit(event: JSONObject) {
+        if (event.optString("type") == "auth_event") loginEvent = event
+        if (taskStart != null && event.optString("taskId") == taskStart?.optString("taskId")) {
+            val last = taskEvents.lastOrNull()
+            if (event.optString("type") == "text" && last?.optString("type") == "text" && last.optString("delta").length < 12000)
+                last.put("delta", last.getString("delta") + event.getString("delta"))
+            else taskEvents.add(JSONObject(event.toString()))
+        }
+        sendToClients { eventMessage(event) }
+    }
+
+    private fun eventMessage(event: JSONObject) = Message.obtain(null, EngineIpc.EVENT).apply { data = Bundle().apply { putString("json", event.toString()) } }
+
+    private fun sendToClients(message: () -> Message) {
+        val iterator = clients.iterator()
+        while (iterator.hasNext()) try { iterator.next().send(message()) } catch (_: RemoteException) { iterator.remove() }
     }
 
     private fun write(command: JSONObject) {
@@ -142,6 +245,9 @@ class EngineService : Service() {
     private fun stopEngine() {
         if (closing) return
         closing = true
+        cancelled = true
+        pausedTool = null
+        toolJob?.cancel()
         handler.removeCallbacks(startupDeadline)
         publish(state.copy(phase = EnginePhase.STOPPING))
         writer?.let { write(JSONObject().put("type", "stop")) }
@@ -164,15 +270,16 @@ class EngineService : Service() {
 
     private fun publish(next: EngineState) {
         state = next
-        try {
-            client?.send(Message.obtain(null, EngineIpc.STATE).apply {
+        sendToClients {
+            Message.obtain(null, EngineIpc.STATE).apply {
                 data = Bundle().apply { putString("phase", next.phase.name); putString("detail", next.detail); putInt("pid", next.pid) }
-            })
-        } catch (_: RemoteException) { client = null }
+            }
+        }
     }
 
     override fun onDestroy() {
         writer?.close()
+        scope.cancel()
         handler.removeCallbacksAndMessages(null)
         super.onDestroy()
         Process.killProcess(Process.myPid())

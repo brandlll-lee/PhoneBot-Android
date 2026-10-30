@@ -1,6 +1,6 @@
 import { createServer } from "node:http";
 
-export async function startFixture({ hang = false, fail = false } = {}) {
+export async function startFixture({ hang = false, fail = false, tool = "runtime_info", params = {} } = {}) {
   let requests = 0;
   let toolResult;
   const server = createServer(async (request, response) => {
@@ -14,7 +14,7 @@ export async function startFixture({ hang = false, fail = false } = {}) {
     response.writeHead(200, { "Content-Type": "text/event-stream" });
     const delta = toolResult
       ? { content: `Tool result received: ${toolResult}` }
-      : { tool_calls: [{ index: 0, id: "probe-tool", type: "function", function: { name: "runtime_info", arguments: "{}" } }] };
+      : { tool_calls: [{ index: 0, id: "probe-tool", type: "function", function: { name: tool, arguments: JSON.stringify(params) } }] };
     for (const [part, reason] of [[delta, null], [{}, toolResult ? "stop" : "tool_calls"]]) {
       response.write(`data: ${JSON.stringify({ id: "probe", object: "chat.completion.chunk", created: 1, model: "phonebot-probe", choices: [{ index: 0, delta: part, finish_reason: reason }] })}\n\n`);
     }

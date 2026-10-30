@@ -16,5 +16,7 @@ internal object EngineIpc {
     const val CONNECT = 1
     const val COMMAND = 2
     const val STATE = 3
+    const val EVENT = 4
+    const val DISCONNECT = 5
     const val STOP = "dev.phonebot.android.STOP"
 }

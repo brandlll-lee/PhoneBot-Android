@@ -1,0 +1,6 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <application>
+        <receiver android:name=".testing.PhoneTestReceiver" android:exported="false" android:process=":engine" />
+        <activity android:name=".testing.PhoneTestActivity" android:exported="false" />
+    </application>
+</manifest>

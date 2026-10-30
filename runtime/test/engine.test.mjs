@@ -73,15 +73,65 @@ test("host tool errors reach the caller", async (t) => {
   assert.match((await host.next("error")).message, /Kotlin tool failed/);
 });
 
-test("verification validates HTTPS and accepts the next command after failure", async (t) => {
+test("verification rejects models outside the Pi catalog and accepts the next command", async (t) => {
   const host = engine(t);
   await host.next("ready");
-  host.send({ type: "verify", config: { baseUrl: "http://example.com", model: "test", apiKey: "secret" } });
-  assert.match((await host.next("error")).message, /HTTPS/);
+  host.send({ type: "verify", provider: "unknown", model: "test" });
+  assert.match((await host.next("error")).message, /Pi/);
   host.send({ type: "probe" });
   const tool = await host.next("tool");
   host.send({ type: "probe" });
   assert.match((await host.next("error")).message, /busy/);
   host.send({ type: "tool_result", id: tool.id, result: { pid: 43 } });
   await host.next("result");
+});
+
+test("bundled provider catalog and Pi login persist credentials through the host store", async (t) => {
+  const host = engine(t, "dist/engine.mjs");
+  await host.next("ready");
+  host.send({ type: "catalog", provider: "openai" });
+  let call = await host.next("tool");
+  assert.equal(call.name, "vault_list");
+  host.send({ type: "tool_result", id: call.id, result: [] });
+  const catalog = await host.next("catalog");
+  assert.ok(catalog.providers.length >= 40);
+  assert.ok(catalog.providers.find((p) => p.id === "anthropic").auth.some((a) => a.id === "oauth"));
+  assert.ok(catalog.models.length > 0);
+  assert.ok(catalog.total >= catalog.models.length);
+  await host.next("idle");
+
+  host.send({ type: "login", provider: "deepseek", auth: "api_key" });
+  call = await host.next("tool");
+  assert.equal(call.name, "auth_prompt");
+  assert.equal(call.params.type, "secret");
+  host.send({ type: "tool_result", id: call.id, result: "test-encrypted-key", secret: true });
+  call = await host.next("tool");
+  assert.equal(call.name, "vault_read");
+  host.send({ type: "tool_result", id: call.id, result: null });
+  call = await host.next("tool");
+  assert.equal(call.name, "vault_write");
+  assert.equal(call.params.credential.key, "test-encrypted-key");
+  host.send({ type: "tool_result", id: call.id, result: true });
+  assert.equal((await host.next("account")).configured, true);
+  await host.next("idle");
+  host.send({ type: "logout", provider: "deepseek" });
+  call = await host.next("tool");
+  assert.equal(call.name, "vault_delete");
+  host.send({ type: "tool_result", id: call.id, result: true });
+  assert.equal((await host.next("account")).configured, false);
+});
+
+test("task cancellation releases the tool wait and leaves the engine ready", async (t) => {
+  const host = engine(t);
+  await host.next("ready");
+  host.send({ type: "probe", taskId: "cancel-test" });
+  const call = await host.next("tool");
+  host.send({ type: "cancel" });
+  await host.next("cancelled");
+  await host.next("idle");
+  host.send({ type: "tool_result", id: call.id, result: { stale: true } });
+  host.send({ type: "probe" });
+  const next = await host.next("tool");
+  host.send({ type: "tool_result", id: next.id, result: { recovered: true } });
+  assert.match((await host.next("result")).text, /recovered/);
 });
