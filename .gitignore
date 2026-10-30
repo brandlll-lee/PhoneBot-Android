@@ -1,0 +1,14 @@
+.gradle/
+.kotlin/
+.idea/
+.tools/
+**/build/
+**/.cxx/
+local.properties
+references/
+runtime/node_modules/
+runtime/dist/
+app/src/main/assets/runtime/
+app/src/main/jniLibs/
+app/src/main/cpp/include/
+*.iml
