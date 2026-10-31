@@ -3,6 +3,8 @@ package dev.phonebot.android.testing
 import android.app.Activity
 import android.app.AlertDialog
 import android.annotation.SuppressLint
+import android.content.Intent
+import android.provider.Settings
 import android.os.Bundle
 import android.view.View
 import android.widget.Button
@@ -29,6 +31,7 @@ class PhoneTestActivity : Activity() {
         layout.addView(TextView(this).apply { text = "屏幕识别 OCR English 123"; textSize = 24f; importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO; setTextColor(0xFF111111.toInt()) })
         repeat(2) { layout.addView(Button(this).apply { text = "重复目标" }) }
         layout.addView(Button(this).apply { text = "显示弹窗"; setOnClickListener { AlertDialog.Builder(this@PhoneTestActivity).setTitle("测试弹窗").setPositiveButton("关闭", null).show() } })
+        layout.addView(Button(this).apply { text = "打开系统设置"; setOnClickListener { startActivity(Intent(Settings.ACTION_SOUND_SETTINGS)) } })
         layout.addView(View(this), LinearLayout.LayoutParams(1, 0, 1f))
         layout.addView(Button(this).apply { text = "底部按钮"; setOnClickListener { result.text = "底部点击成功" } })
         setContentView(layout)

@@ -31,12 +31,20 @@ Install the APK on Android 9 or later. Supported ABIs are ARM64 and x86-64.
 1. Open PhoneBot. The foreground engine starts with the app.
 2. Open **设置 → 模型服务**. Select a Pi provider. Use its API-key or browser login flow. Select a model. Press **验证连接** to send a small real request. Provider charges can apply.
 3. Open **设置 → 权限**. Enable the accessibility service. Keep the display on and unlocked. Enable notifications and the **任务结果横幅** channel to receive task results. Tap a result notification to open its conversation and task.
-4. Enter a task in the chat. Expand execution steps to inspect tool results. Use the square Stop control to cancel the task. A permission pause offers an explicit resume control after authorization.
+4. Use the model button above the input to select a model from the current provider. Use **管理模型服务** to configure providers. Enter a task. The input grows to five visible lines. Accepted sends clear the input and close the keyboard. Expand execution steps to inspect tool results. Use the square Stop control to cancel the task. A permission pause offers an explicit resume control after authorization.
 5. Use the drawer to find or delete conversations. Use **设置 → 停止引擎** to end the engine process. Use **启动引擎** to start a fresh process.
 
 Pi supplies the provider catalog, authentication flows, token refresh, model requests, and agent loop. Android encrypts API keys and OAuth credentials with Keystore. Provider and model defaults survive restart. A successful connection check marks that exact model as verified on this installation. Other entries remain unverified.
 
 The tools read accessibility elements, capture screenshots, recognize Chinese and English text, list and open apps, tap, swipe, enter Chinese text, go Back, and go Home. Input includes a read-back check. Actions return screen changes with a snapshot baseline. `do_steps` runs predictable actions locally and stops on a failed check or detected dialog. All coordinates use the full main display. Screenshots and OCR require Android 11 or later. Images use JPEG quality 80 and a longest edge of 1280 pixels. Image results require a vision model. Secure windows can block screenshots.
+
+An unavailable accessibility tree returns an empty observation. Screenshot, Home, and app launch remain available. A dispatched action and a verified goal have separate results. Unknown navigation stops the batch for review. It does not by itself mark the action as failed.
+
+System tools read and set media volume, brightness, and Wi-Fi. Brightness needs **修改系统设置** authorization. Direct Wi-Fi changes and system commands need a running, authorized [Shizuku](https://shizuku.rikka.app/guide/setup/) connection. Otherwise, Wi-Fi opens the system panel for user or UI action. Commands use the connection's shell or root privileges. They have a ten-second execution limit and a 32768-character output limit. Commands cannot bypass Android's permission rules.
+
+Alarm, timer, and calendar tools use standard Android intents. They open the system handler and report that the result still needs verification. `app_send_intent` dispatches Android actions with scalar extras. `phone_open_link` opens supported links or standard sound, display, network, and app-detail settings pages.
+
+Tasks end through `task_finish`. Completion needs evidence from that task. Screen conditions are checked against a fresh observation. Visual-only proof must use the last tool call's current-task image. Setting changes are read back again before completion. Partial results and blocked tasks retain their own status. Evidence checks establish observation provenance; the model must still interpret visual content and the user's full goal correctly.
 
 Assistant replies render as Markdown, including lists, links, tables, and highlighted code with Copy. Task completion posts one result notification in foreground or background. A stable page means its tree is quiet. Actions use explicit postconditions to verify loaded results. Earlier screen images remain available by reference instead of entering every new task's requests.
 

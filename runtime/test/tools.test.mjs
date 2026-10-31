@@ -5,6 +5,7 @@ import { createModels, createProvider } from "@earendil-works/pi-ai";
 import { stream, streamSimple } from "@earendil-works/pi-ai/api/openai-completions";
 import { phoneTools } from "../src/tools.mjs";
 import { startFixture } from "../src/fixture.mjs";
+import { taskEvidence } from "../src/evidence.mjs";
 
 test("Pi dispatches a phone tool and sends its screen result in the next request", async (t) => {
   const fixture = await startFixture({ tool: "screen_read", params: { ocr: true } });
@@ -53,4 +54,32 @@ test("Pi dispatches two locally checked actions in one tool round trip", async (
   await agent.prompt("打开设置中的语言页面");
   assert.deepEqual(calls, [{ name: "do_steps", args: { steps } }]);
   assert.equal(fixture.evidence().requests, 2);
+});
+
+test("Pi rejects a false completion, checks the current page, and ends with an honest result", async (t) => {
+  const call = (id, name, args) => ({ tool_calls: [{ index: 0, id, type: "function", function: { name, arguments: JSON.stringify(args) } }] });
+  const fixture = await startFixture({ turns: [
+    call("read", "screen_read", {}), { content: "相册已打开" },
+    call("finish", "task_finish", { outcome: "completed", summary: "相册已打开", evidence: [{ callId: "read", claim: "相册在前台", condition: { package: "gallery" } }] }),
+    call("blocked", "task_finish", { outcome: "blocked", summary: "相册尚未打开", evidence: [] }),
+  ] });
+  t.after(fixture.close);
+  const model = { id: "phone", name: "phone", provider: "fixture", api: "openai-completions", baseUrl: fixture.baseUrl,
+    reasoning: false, input: ["text"], contextWindow: 10000, maxTokens: 1000, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 } };
+  const models = createModels();
+  models.setProvider(createProvider({ id: "fixture", models: [model], auth: { apiKey: { name: "fixture", resolve: async () => ({ auth: { apiKey: "fixture" } }) } }, api: { stream, streamSimple } }));
+  const calls = [];
+  const host = async (name) => {
+    calls.push(name);
+    return { taskId: "task", snapshot: 1, package: "dev.phonebot.android", ok: name !== "screen_check" };
+  };
+  const evidence = taskEvidence("task", host);
+  const agent = new Agent({ initialState: { model, tools: phoneTools(host, model, undefined, undefined, evidence) },
+    streamFn: models.streamSimple.bind(models), finishTurn: evidence.finishTurn, toolExecution: "sequential" });
+  await agent.prompt("打开相册");
+  assert.deepEqual(calls, ["screen_read", "screen_check"]);
+  assert.equal(fixture.evidence().requests, 4);
+  assert.equal(evidence.finished.outcome, "blocked");
+  assert.equal(evidence.finished.summary, "相册尚未打开");
+  assert.ok(agent.state.messages.some((m) => m.role === "toolResult" && m.isError));
 });

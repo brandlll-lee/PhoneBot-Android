@@ -7,6 +7,7 @@ import android.hardware.display.DisplayManager
 import android.os.Build
 import android.view.Display
 import android.view.accessibility.AccessibilityNodeInfo
+import android.view.accessibility.AccessibilityWindowInfo
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -21,14 +22,14 @@ internal data class ScreenGeometry(val width: Int, val height: Int, val rotation
     }
     companion object {
         @Suppress("DEPRECATION")
-        fun read(service: AccessibilityService, root: AccessibilityNodeInfo): ScreenGeometry {
+        fun read(service: AccessibilityService, root: AccessibilityNodeInfo? = null): ScreenGeometry {
             val display = checkNotNull(service.getSystemService(DisplayManager::class.java).getDisplay(Display.DEFAULT_DISPLAY))
             // Gesture coordinates use the rotated logical display, including system bars.
             val size = Point().also(display::getRealSize)
             val full = Rect(0, 0, size.x, size.y)
-            val window = Rect().also { out -> service.windows.firstOrNull { it.id == root.windowId }?.getBoundsInScreen(out) }
+            val window = Rect().also { out -> service.windows.firstOrNull { it.id == root?.windowId }?.getBoundsInScreen(out) }
             if (!window.intersect(full)) window.set(full)
-            val content = Rect().also(root::getBoundsInScreen)
+            val content = Rect().also { root?.getBoundsInScreen(it) }
             if (!content.intersect(window)) content.set(window)
             return ScreenGeometry(size.x, size.y, display.rotation, window, content)
         }
@@ -45,6 +46,8 @@ internal class ScreenState(private val service: AccessibilityService) {
     private var shown: JSONObject? = null
     lateinit var geometry: ScreenGeometry; private set
     var latest = JSONObject(); private set
+    var taskId = ""
+    var root: AccessibilityNodeInfo? = null; private set
 
     fun reset() { entries = emptyList(); remembered.clear(); shown = null; scope = "" }
 
@@ -52,9 +55,13 @@ internal class ScreenState(private val service: AccessibilityService) {
         "$ancestry|${node.className}|${node.viewIdResourceName}|${if (node.isPassword) "" else node.contentDescription?.toString()?.take(120).orEmpty()}|${if (node.isEditable || node.isPassword) "" else node.text?.toString()?.take(120).orEmpty()}"
 
     fun scan(): JSONObject {
-        val root = service.rootInActiveWindow ?: error("当前页面不可读取。请切换页面后重试。")
+        val windows = runCatching { service.windows }.getOrDefault(emptyList())
+        root = windows.filter { it.type == AccessibilityWindowInfo.TYPE_APPLICATION }
+            .sortedByDescending { if (it.isActive) 2 else if (it.isFocused) 1 else 0 }
+            .firstNotNullOfOrNull { it.root } ?: runCatching { service.rootInActiveWindow }.getOrNull()
+        val root = root
         geometry = ScreenGeometry.read(service, root)
-        val nextScope = "${root.packageName}:${root.windowId}:${geometry.width}:${geometry.height}:${geometry.rotation}"
+        val nextScope = "${root?.packageName}:${root?.windowId}:${geometry.width}:${geometry.height}:${geometry.rotation}"
         if (scope != nextScope) { reset(); scope = nextScope }
         val collected = mutableListOf<Pair<AccessibilityNodeInfo, String>>()
         var scanned = 0
@@ -64,7 +71,7 @@ internal class ScreenState(private val service: AccessibilityService) {
             val parent = "$ancestry/${node.viewIdResourceName.orEmpty()}:${node.className}"
             for (index in 0 until node.childCount) node.getChild(index)?.let { visit(it, parent) }
         }
-        visit(root, "")
+        root?.let { visit(it, "") }
         val old = entries
         val used = mutableSetOf<String>()
         val identities = collected.take(80).groupingBy { (node, ancestry) -> identity(node, ancestry) }.eachCount()
@@ -86,7 +93,10 @@ internal class ScreenState(private val service: AccessibilityService) {
         }
         entries.forEach { remembered[it.id] = it }
         while (remembered.size > 320) remembered.remove(remembered.keys.first())
-        latest = JSONObject().put("snapshot", ++sequence).put("page", scope).put("package", root.packageName)
+        latest = JSONObject().put("snapshot", ++sequence).put("page", scope).put("package", root?.packageName?.toString() ?: JSONObject.NULL)
+            .put("taskId", taskId).put("observedAt", System.currentTimeMillis()).put("treeReadable", root != null)
+            .put("windows", JSONArray(windows.map { window -> JSONObject().put("id", window.id).put("type", window.type)
+                .put("active", window.isActive).put("focused", window.isFocused) }))
             .put("width", geometry.width).put("height", geometry.height).put("geometry", geometry.json())
             .put("elements", JSONArray(entries.map { it.value })).put("truncated", collected.size > entries.size || scanned > 1500)
         return latest
@@ -115,6 +125,7 @@ internal class ScreenState(private val service: AccessibilityService) {
 
     fun text(): Set<String> = entries.filterNot { it.node.isPassword }.mapNotNull { it.node.text?.toString() }.toSet()
     fun condition(expected: JSONObject): Boolean {
+        if (!latest.optBoolean("treeReadable")) return false
         if (expected.has("package") && latest.optString("package") != expected.getString("package")) return false
         val selectors = listOf("element", "text", "resourceId", "editable", "enabled", "withinResourceId")
         if (selectors.none(expected::has)) return !expected.optBoolean("absent")
@@ -132,7 +143,7 @@ internal class ScreenState(private val service: AccessibilityService) {
     }
     fun editable(): AccessibilityNodeInfo? = entries.map { it.node }.singleOrNull { it.isEditable && it.isFocused && !it.isPassword }
 
-    fun fingerprint(): String = latest.optString("page") + entries.joinToString { it.value.toString() }
+    fun fingerprint(): String = if (latest.optBoolean("treeReadable")) latest.optString("page") + entries.joinToString { it.value.toString() } else ""
 
     fun present(full: Boolean): JSONObject {
         val current = latest

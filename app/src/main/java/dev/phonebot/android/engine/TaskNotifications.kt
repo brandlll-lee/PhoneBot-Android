@@ -20,7 +20,7 @@ internal object TaskNotifications {
 
     fun post(context: Context, journal: TaskJournal, start: JSONObject, event: JSONObject): Boolean {
         val title = when (event.optString("type")) {
-            "result" -> "执行结束"
+            "result" -> when (event.optString("outcome")) { "partial" -> "部分完成"; "blocked" -> "任务受阻"; "completed" -> "任务完成"; else -> "执行结束" }
             "error", "interrupted" -> "执行失败"
             "cancelled" -> "已停止"
             else -> return false

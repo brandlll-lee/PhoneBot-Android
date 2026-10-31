@@ -38,7 +38,7 @@ private fun ChatTurn.event(event: JSONObject): ChatTurn = when (event.optString(
     "attachment" -> copy(image = event.getString("path"))
     "step" -> copy(steps = steps.filterNot { it.id == event.getString("id") } + TaskStep(event.getString("id"), event.getString("name"), event.optJSONObject("args")?.toString().orEmpty()))
     "step_result" -> copy(steps = steps.map { if (it.id == event.getString("id")) it.copy(done = true, error = event.optBoolean("error"), detail = event.optString("text")) else it })
-    "result" -> copy(answer = event.getString("text"), status = "done")
+    "result" -> copy(answer = event.getString("text"), status = when (event.optString("outcome")) { "partial" -> "partial"; "blocked" -> "blocked"; else -> "done" })
     "error", "cancelled", "interrupted" -> copy(status = when (event.getString("type")) { "cancelled" -> "stopped"; "interrupted" -> "interrupted"; else -> "error" },
         answer = event.optString("message", "任务已停止").let { if (answer.isBlank()) it else "$answer\n\n$it" })
     else -> this
@@ -225,7 +225,7 @@ class PhoneBotModel(application: Application) : AndroidViewModel(application) {
             "auth_event" -> authEvent = event
             "permission" -> { permission = event.getString("permission"); refreshPermissions() }
             "text", "attachment", "step", "step_result" -> if (event.optString("taskId") == activeTask) changeTurn { it.event(event) }
-            "result" -> if (event.optString("taskId") == activeTask) changeTurn { it.copy(answer = event.getString("text"), status = "done") } else notice = "自检通过"
+            "result" -> if (event.optString("taskId") == activeTask) changeTurn { it.event(event) } else notice = "自检通过"
             "error", "cancelled", "interrupted" -> {
                 val message = event.optString("message", "任务已停止")
                 if (activeTask.isNotEmpty()) changeTurn { it.event(event) }

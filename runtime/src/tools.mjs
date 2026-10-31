@@ -5,15 +5,20 @@ const coordinate = Type.Integer({ minimum: 0, maximum: 20000 });
 const target = { element: Type.Optional(text), text: Type.Optional(text), resourceId: Type.Optional(text), x: Type.Optional(coordinate), y: Type.Optional(coordinate) };
 const condition = Type.Object({ element: Type.Optional(text), text: Type.Optional(text), resourceId: Type.Optional(text), package: Type.Optional(text),
   editable: Type.Optional(Type.Boolean()), enabled: Type.Optional(Type.Boolean()), withinResourceId: Type.Optional(text), absent: Type.Optional(Type.Boolean()) }, { additionalProperties: false, minProperties: 1 });
+const settings = ["SETTINGS", "WIFI_SETTINGS", "BLUETOOTH_SETTINGS", "SOUND_SETTINGS", "DISPLAY_SETTINGS", "APPLICATION_DETAILS_SETTINGS", "APPLICATION_SETTINGS", "DATE_SETTINGS", "LOCALE_SETTINGS", "DEVICE_INFO_SETTINGS", "LOCATION_SOURCE_SETTINGS", "INTERNAL_STORAGE_SETTINGS", "ACCESSIBILITY_SETTINGS", "BATTERY_SAVER_SETTINGS"].map((s) => `android.settings.${s}`);
+const intent = { action: text, data: Type.Optional(text), type: Type.Optional(text), package: Type.Optional(text),
+  extras: Type.Optional(Type.Record(Type.String(), Type.Union([Type.String(), Type.Number(), Type.Boolean()]))) };
 const actions = [
   ["app_launch", "打开应用", "Launch a known package.", { package: text }],
+  ["app_send_intent", "打开系统入口", "Start an Android activity by action/data/type/package/extras. Opening an activity is not proof the requested setting changed. Prefer the matching settings action over launching the Settings package.", intent],
+  ["phone_open_link", "打开页面", "Open a supported settings action or a URI. Application details uses uri package:the.package. An unresolved link needs UI navigation.", { action: Type.Optional(Type.Union(settings.map(Type.Literal))), uri: Type.Optional(text), package: Type.Optional(text) }],
   ["tap", "点击", "Tap a current element, exact text/resource ID, or screen coordinates.", target],
   ["swipe", "滑动", "Swipe by direction or screen coordinates.", { x: Type.Optional(coordinate), y: Type.Optional(coordinate), endX: Type.Optional(coordinate), endY: Type.Optional(coordinate),
     direction: Type.Optional(Type.Union(["up", "down", "left", "right"].map(Type.Literal))), duration: Type.Optional(Type.Integer({ minimum: 100, maximum: 2000 })) }],
   ["input_text", "输入文字", "Replace editable text and verify read-back. target selects the input's current text or description.", { element: Type.Optional(text), resourceId: Type.Optional(text), target: Type.Optional(text), text }],
   ["back", "返回", "Perform Android Back.", {}],
   ["home", "回到主页", "Go to Android Home.", {}],
-].map(([name, label, description, schema]) => [name, label, `${description} Returns screen changes, treeStable, conditionMet and stopReason. expect waits for a postcondition; text defaults to non-editable content. Use editable:true for input checks and withinResourceId for a result region. Without expect, tree stability does not mean business readiness.`,
+].map(([name, label, description, schema]) => [name, label, `${description} Returns executed, ok, canContinue, navigation, screen changes, treeStable, conditionMet and stopReason. An unplanned navigation stops a batch for review; the dispatched action can still succeed. expect waits for a postcondition; text defaults to non-editable content. Use editable:true for input checks and withinResourceId for a result region. Without expect, tree stability does not mean business readiness.`,
   { ...schema, expect: Type.Optional(condition), timeoutMs: Type.Optional(Type.Integer({ minimum: 250, maximum: 15000 })) }]);
 const batch = Type.Union(actions.map(([name, , , schema]) => Type.Object({ tool: Type.Literal(name),
   args: Type.Object(schema, { additionalProperties: false }) }, { additionalProperties: false })));
@@ -21,14 +26,24 @@ const definitions = [
   ["screen_read", "读取页面", "Read full visible elements with stable IDs and screen-pixel bounds. Actions already return screen changes. Read again only for missing or ambiguous evidence. Prefer the tree, then OCR for sparse text, then image for visual content.", { ocr: Type.Optional(Type.Boolean()), image: Type.Optional(Type.Boolean()) }],
   ["screenshot", "截取屏幕", "Capture the unlocked main display. Returns an image for vision models.", {}],
   ["app_list", "查看应用", "List launchable apps and package names.", {}],
+  ["device_status", "读取设备设置", "Read actual media volume/mute, brightness, Wi-Fi and system-command availability.", {}],
+  ["volume_set", "设置媒体音量", "Set media volume to 0–100 percent and read the actual level and mute state back.", { percent: Type.Integer({ minimum: 0, maximum: 100 }) }],
+  ["brightness_set", "设置亮度", "Set brightness 0–100 percent or adaptive brightness with auto:true. Requires modify-system-settings authorization. Returns the actual stored value and mode.", { percent: Type.Optional(Type.Integer({ minimum: 0, maximum: 100 })), auto: Type.Optional(Type.Boolean()) }],
+  ["wifi_toggle", "设置无线网络", "Set Wi-Fi using an authorized system shell. Otherwise open the Wi-Fi panel. verified:false means user/UI action is still required. Verify actual state with device_status.", { on: Type.Boolean() }],
+  ["phone_set_alarm", "设置闹钟", "Open the system clock with an alarm time. Read the resulting page and verify whether the alarm was saved.", { hour: Type.Integer({ minimum: 0, maximum: 23 }), minute: Type.Integer({ minimum: 0, maximum: 59 }), label: Type.Optional(text) }],
+  ["phone_set_timer", "设置计时器", "Open the system clock with a duration. Verify the timer's actual running state.", { seconds: Type.Integer({ minimum: 1, maximum: 86400 }), label: Type.Optional(text) }],
+  ["phone_add_calendar_event", "添加日程", "Open the calendar editor. Times are Unix epoch milliseconds. Read the page and verify saving; opening the editor alone is not completion.", { title: text, beginTime: Type.Integer({ minimum: 1 }), endTime: Type.Integer({ minimum: 1 }), location: Type.Optional(text), description: Type.Optional(text) }],
+  ["phone_system_command", "执行系统命令", "Run a command through connected and authorized Shizuku with its shell/root permissions. Timeout 10 seconds, output at most 32768 characters. Command success is not proof of a setting change; read back the target state. Prefer phone UI tools for tapping, input and navigation.", { command: text }],
   ...actions,
   ["do_steps", "连续操作", 'Execute 1–12 known actions using the same arguments, waits and checks as single actions. Current element IDs are allowed; use semantic selectors on later pages. Stop at unknown UI. Example: input_text {resourceId:"known input",text:"query"}, tap {text:"Search",expect:{resourceId:"known result",text:"query"}}. Do not batch payments, sending, deletion, login or confirmations.', { steps: Type.Array(batch, { minItems: 1, maxItems: 12 }) }],
 ];
 
-export function phoneTools(host, model, attachment = () => {}, images) {
+export function phoneTools(host, model, attachment = () => {}, images, evidence) {
   const tools = definitions.map(([name, label, description, schema]) => ({
     name, label, description, parameters: Type.Object(schema, { additionalProperties: false }),
     async execute(id, params, signal) {
+      if (evidence?.finished) throw new Error("任务已结束");
+      evidence?.record(id, name, params, { ok: false });
       const details = await host(name, params, signal, id);
       const { image, ...view } = details;
       const content = [{ type: "text", text: JSON.stringify(view) }];
@@ -38,9 +53,16 @@ export function phoneTools(host, model, attachment = () => {}, images) {
         attachment(image);
         content.push({ type: "image", data: (await readFile(image)).toString("base64"), mimeType: details.imageInfo?.mimeType || "image/jpeg" });
       }
+      evidence?.record(id, name, params, details);
       return { content, details: view, isError: view.ok === false };
     },
   }));
+  if (evidence) tools.push({ name: "task_finish", label: "核对任务结果",
+    description: "Finish this task with its current evidence. Use completed only after all requested goals hold. Each screen claim needs a condition checked against a fresh screen. For visual-only targets, cite an image you actually inspected from this task's very last tool call and describe its visible proof. Cite this task's tool call IDs, never historical calls. Use partial/blocked for unmet goals. Use answered only for conversation with no device tool calls. This tool ends execution; include the final Chinese Markdown answer in summary.",
+    parameters: Type.Object({ outcome: Type.Union(["completed", "partial", "blocked", "answered"].map(Type.Literal)), summary: text,
+      evidence: Type.Array(Type.Object({ callId: text, claim: text, condition: Type.Optional(condition) }, { additionalProperties: false }), { maxItems: 8 }) }, { additionalProperties: false }),
+    execute: async (_id, params, signal) => { const result = await evidence.finish(params, signal); return { content: [{ type: "text", text: JSON.stringify(result) }], details: result }; },
+  });
   if (images) tools.push({ name: "image_recall", label: "回看图片", description: "Retrieve an archived image by its reference when the user refers to an earlier screenshot. It is historical evidence, not the current screen.",
     parameters: Type.Object({ reference: Type.String({ pattern: "^[a-f0-9]{64}$" }) }, { additionalProperties: false }),
     execute: async (_id, { reference }) => {

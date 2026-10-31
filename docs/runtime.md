@@ -54,9 +54,31 @@ Actions return a diff against the last presented snapshot. Diffs name `baseSnaps
 
 `PhoneActions` executes single actions and `do_steps` through the same action, wait, and check path. App launch uses a launch intent. Tap prefers a node action, with a gesture fallback. Input uses `ACTION_SET_TEXT` or the Android 13+ accessibility input connection and checks read-back. Back and Home use global actions.
 
+`ScreenState` reads the active application window, with a focused-window fallback. A missing root returns `treeReadable:false`, an empty element list, display geometry, and window metadata. It does not throw. Screenshot capture, global actions, app launch, and coordinate gestures do not need a root node. Node-targeted actions still need a unique live target. Every observation carries `taskId` and `observedAt`. A service that connects during a permission pause joins the current task before executing its next tool.
+
 Actions accept an optional `expect` condition and `timeoutMs`. Conditions match package, element ID, exact text, resource ID, editable/enabled state, ancestor resource ID (`withinResourceId`), or absence. Text conditions default to non-editable nodes. Set `editable:true` for an input check. Use a result selector to wait for a search response. `treeStable` requires repeated matching trees and a quiet event interval. `conditionMet` is null when no condition was supplied. A quiet tree alone does not establish business readiness. Results include wait duration and stop reason. Default limits are 2500 ms for tree stability and 8000 ms with a condition; explicit bounds are 250–15000 ms.
 
-`do_steps` reuses each single action's schema. It accepts current element IDs and semantic selectors for subsequent pages. Each step checks cancellation and display availability. Failure, a newly detected standard dialog, an unexpected app switch, or a timeout stops remaining steps. A reviewed dialog can receive a targeted action, including Close or Back. Custom in-app overlays without dialog semantics can require model review. Each substep produces its own timeline entry. The prompt recommends batching known input/submit/wait sequences and returning unknown pages to the model.
+`do_steps` reuses each single action's schema. It accepts current element IDs and semantic selectors for subsequent pages. Each step checks cancellation and display availability. Results separate `executed`, `ok`, `canContinue`, and `navigation`. A supplied condition determines goal verification. Without a condition, `ok` reports successful dispatch. Navigation is `none`, `expected`, or `unplanned`. A package condition can verify an intended destination. An unplanned destination or a new standard dialog stops the batch for review. The dispatched action can still succeed. Clicks, swipes, and generic intents need a satisfied postcondition before another batch step can run. Input read-back and global navigation can continue after a stable observation. An unmet condition or unreadable state stops remaining steps. Each substep produces its own timeline entry. Custom in-app overlays without dialog semantics can require model review.
+
+## System capabilities
+
+`PhoneSystem` runs separately from accessibility-based actions. `device_status` returns actual media volume and mute state, brightness mode and value, Wi-Fi state, local time zone, observation time, and shell availability. `volume_set` uses `AudioManager`. `brightness_set` validates its arguments before changing `Settings.System` and requires `canWrite`. Both return actual values after the write.
+
+`wifi_toggle` uses `svc wifi` through an authorized Shizuku user service and waits for the actual Wi-Fi state. Without that connection, it opens the Android Wi-Fi panel, or Wi-Fi settings on API 28. An opened panel returns `verified:false`.
+
+`phone_set_alarm`, `phone_set_timer`, and `phone_add_calendar_event` use standard clock and calendar intents. They return `opened` and `verified:false`. The agent must inspect and confirm the resulting state. Android can require user confirmation or have no app for the requested action.
+
+`PhoneIntents` validates actions, URI schemes, target packages, and scalar extras before dispatch. `app_send_intent` accepts an Android action. `phone_open_link` accepts supported links or a listed standard settings action. App-detail settings require a `package:` URI. No activity is started for invalid arguments.
+
+`PhoneShell` uses Shizuku API/provider 13.1.5. The application sets each process's provider role before provider creation. The engine requests the main process's binder. The exported binder provider requires `INTERACT_ACROSS_USERS_FULL`. The user starts Shizuku and grants access through the permission page. A command binds a non-daemon user service, waits up to ten seconds for connection, and removes its callback after execution. Shizuku reuses the service across commands and stops it when its owning app process dies. The service runs `/system/bin/sh -c` under the connection's shell/root UID. Execution has a ten-second limit. Output is drained and capped at 32768 characters. Cancellation terminates the active child; service destruction ends its process. Commands already dispatched to Android can have lasting effects. A zero exit code establishes command success, not the requested setting's state.
+
+## Completion evidence
+
+Each Pi run owns a fresh evidence map. Tool attempts and results use their current call IDs. Historical calls cannot enter that map. `task_finish` records `completed`, `partial`, `blocked`, or `answered`. Completed device tasks need current-task evidence. Pure conversation can use `answered` only if no device tool was attempted.
+
+Screen evidence supplies a condition for an internal fresh `screen_check`. The current observation must belong to the task and satisfy that condition. A visual-only result can cite an inspected current-task image only when it came from the last device tool call. Later actions invalidate that visual proof. Native setting changes are checked again with `device_status`. Opening an editor or returning a command exit code does not verify a goal. The model remains responsible for visual interpretation and complete coverage of the user's request.
+
+Pi's `finishTurn` ends the run after an accepted `task_finish`. An ordinary final answer triggers a bounded request to submit evidence. A run that does not submit a result fails instead of publishing an unchecked success. The journal stores the terminal outcome and its evidence. Live rendering, restored history, and result notifications use that outcome.
 
 ## Task records and model context
 
@@ -98,6 +120,12 @@ Checked on 2026-10-31. Read the linked source again when changing the related de
 - [Android Keystore](https://developer.android.com/privacy-and-security/keystore): encryption-key generation and storage.
 - [AccessibilityService](https://developer.android.com/reference/android/accessibilityservice/AccessibilityService): window access, screenshots, gestures, and global actions.
 - [AccessibilityNodeInfo](https://developer.android.com/reference/android/view/accessibility/AccessibilityNodeInfo): node text, bounds, actions, and refresh.
+- [Common intents](https://developer.android.com/guide/components/intents-common): clock, timer, calendar editor, and standard settings intents.
+- [AudioManager](https://developer.android.com/reference/android/media/AudioManager): media stream volume and mute state.
+- [Settings.System](https://developer.android.com/reference/android/provider/Settings.System): brightness values, modes, and write authorization.
+- [WifiManager](https://developer.android.com/reference/android/net/wifi/WifiManager): Wi-Fi state and restrictions on direct toggling.
+- [Shizuku API](https://github.com/RikkaApps/Shizuku-API): binder permissions, multiprocess support, user-service lifecycle, and destroy transaction.
+- [Compose text input](https://developer.android.com/develop/ui/compose/text/user-input): text field line limits, IME actions, and input behavior.
 - [Display geometry](https://developer.android.com/reference/android/view/Display#getRealSize(android.graphics.Point)): rotated logical display bounds and the distinction from UI window metrics.
 - [Accessibility input method](https://developer.android.com/reference/android/accessibilityservice/InputMethod): Android 13+ input connection.
 - [Package visibility](https://developer.android.com/training/package-visibility/declaring): launcher intent queries.

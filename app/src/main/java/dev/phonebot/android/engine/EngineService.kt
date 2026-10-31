@@ -23,6 +23,8 @@ import java.io.File
 import java.io.OutputStream
 import org.json.JSONObject
 import dev.phonebot.android.phone.PhoneAccessibilityService
+import dev.phonebot.android.phone.PhoneShell
+import dev.phonebot.android.phone.PhoneSystem
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -40,6 +42,7 @@ class EngineService : Service() {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private val vault by lazy { CredentialVault(this) }
     private val journal by lazy { TaskJournal(File(filesDir, "task-events")) }
+    private val system by lazy { PhoneSystem(this, PhoneShell(this)) }
     private var toolJob: Job? = null
     private var pausedTool: JSONObject? = null
     private var authPrompt: String? = null
@@ -168,7 +171,7 @@ class EngineService : Service() {
                 taskStart = JSONObject(command.toString()).put("type", "task_open")
                 taskEnded = false
                 journal.append(checkNotNull(taskStart))
-                PhoneAccessibilityService.instance?.beginTask()
+                PhoneAccessibilityService.instance?.beginTask(taskId)
             }
             publish(state.copy(phase = EnginePhase.RUNNING, detail = ""))
             write(command)
@@ -201,7 +204,8 @@ class EngineService : Service() {
         if (name == "auth_prompt") { authPrompt = id; promptEvent = event.put("type", "auth_prompt"); emit(event); return }
         val internal = name.startsWith("vault_") || name in setOf("runtime_info", "image_prepare")
         val phone = PhoneAccessibilityService.instance
-        if (!internal && (phone == null || !phone.available())) {
+        if (taskStart?.optString("taskId") == taskId) phone?.beginTask(taskId)
+        if (!internal && name !in PhoneSystem.tools && (phone == null || !phone.available())) {
             pausedTool = event
             emit(JSONObject().put("type", "permission").put("taskId", taskId).put("permission", if (phone == null) "accessibility" else "unlock"))
             return
@@ -211,6 +215,7 @@ class EngineService : Service() {
             val reply = JSONObject().put("type", "tool_result").put("id", id)
             try {
                 val result: Any? = withTimeout(if (name == "do_steps") 90000 else 30000) {
+                    if (name in PhoneSystem.tools) return@withTimeout system.execute(name, params)
                     when (name) {
                         "runtime_info" -> JSONObject().put("platform", "android").put("sdk", Build.VERSION.SDK_INT).put("pid", Process.myPid()).put("manufacturer", Build.MANUFACTURER)
                         "image_prepare" -> withContext(Dispatchers.IO) {

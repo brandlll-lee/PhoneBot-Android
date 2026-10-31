@@ -10,7 +10,11 @@ Align user messages to the right. Put assistant text directly on the page. Show 
 
 Render assistant replies with the same native Markdown component during streaming, after completion, and after history restore. Keep the source Markdown in storage. Parse streaming tails off the UI thread. Keep rendered text visible during final parsing. Support headings, emphasis, lists, quotes, links, tables, and selectable text. Code blocks use syntax highlighting, Copy, and horizontal scrolling. Use the chat's dark palette and system text scaling.
 
-Use the empty state to show the product name and model selection. Use short state messages for loading, failure, permission pauses, and interruption. Show actual task events. Keep model reasoning private.
+Use the empty state to show the product name. Keep model selection above the composer at the left. Use an outlined rounded button with the model name and a down arrow. Truncate long names. Reuse the Pi catalog and stored default. Provide a model-service management entry in the dropdown.
+
+Use a compact rounded input for short text. For wrapped or multiline text, expand the same panel upward. Put text above the Send control. Keep Send at the bottom right. Show at most five lines and scroll the text area vertically beyond that limit. Keep only Send, or Stop during execution, inside the panel. Put one muted hint below it. When submission succeeds, clear the text, remove focus, hide the keyboard, and restore the compact height. A rejected submission keeps the draft and focus.
+
+Use short state messages for loading, failure, permission pauses, and interruption. Distinguish completed, partial, blocked, failed, and stopped results. Show actual task events. Keep model reasoning private.
 
 ## Drawer
 
@@ -21,6 +25,8 @@ Use a search field, date groups, conversation rows, and a settings footer. Highl
 Use one tall sheet with a centered title, back navigation, and Close. Group related rows. Put the icon on the left and the current value on the right. Use inset dividers. Put provider authentication and model selection inside this sheet. Keep credentials out of the conversation.
 
 Only add a secondary label when it adds useful context. Permission purposes and Android connection status provide required information. Establish other hierarchy with font size, weight, spacing, and alignment.
+
+The permission page includes modify-system-settings access and Shizuku authorization. Recheck on resume and after the Shizuku permission response. Missing optional access must not block unrelated tools.
 
 ## Task notifications
 

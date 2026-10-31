@@ -55,11 +55,11 @@ class PresentationTest {
         val manager = context.getSystemService(NotificationManager::class.java)
         TaskNotifications.channel(context)
         val allowed = manager.areNotificationsEnabled() && manager.getNotificationChannel(TaskNotifications.CHANNEL).importance != NotificationManager.IMPORTANCE_NONE
-        for ((type, title) in listOf("result" to "执行结束", "error" to "执行失败", "cancelled" to "已停止")) {
-            val id = "presentation-notification-$type"
+        for ((type, outcome, title) in listOf(Triple("result", "", "执行结束"), Triple("result", "completed", "任务完成"), Triple("result", "partial", "部分完成"), Triple("result", "blocked", "任务受阻"), Triple("error", "", "执行失败"), Triple("cancelled", "", "已停止"))) {
+            val id = "presentation-notification-$type-$outcome"
             val file = File(context.filesDir, "task-events/$id.jsonl")
             val start = JSONObject().put("type", "task_open").put("taskId", id).put("session", "presentation-session").put("prompt", "测试任务")
-            val end = JSONObject().put("type", type).put("taskId", id).put("text", "**已完成**")
+            val end = JSONObject().put("type", type).put("taskId", id).put("outcome", outcome).put("text", "**已完成**")
             try {
                 file.delete()
                 journal.append(start); journal.append(end)

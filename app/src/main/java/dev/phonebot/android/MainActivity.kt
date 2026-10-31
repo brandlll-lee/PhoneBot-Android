@@ -11,6 +11,8 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.SystemBarStyle
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -42,6 +44,12 @@ import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.text.rememberTextMeasurer
+import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.PasswordVisualTransformation
@@ -57,6 +65,7 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import dev.phonebot.android.engine.EnginePhase
 import dev.phonebot.android.phone.PhonePermissions
+import rikka.shizuku.Shizuku
 import kotlinx.coroutines.launch
 import java.time.Instant
 import java.time.LocalDate
@@ -109,8 +118,10 @@ private val Accent = Color(0xFF88ABFF)
     val lifecycle = LocalLifecycleOwner.current.lifecycle
     DisposableEffect(lifecycle) {
         val observer = LifecycleEventObserver { _, event -> if (event == Lifecycle.Event.ON_RESUME) model.refreshPermissions() }
+        val permissionResult = Shizuku.OnRequestPermissionResultListener { _, _ -> scope.launch { model.refreshPermissions() } }
+        Shizuku.addRequestPermissionResultListener(permissionResult)
         lifecycle.addObserver(observer)
-        onDispose { lifecycle.removeObserver(observer) }
+        onDispose { lifecycle.removeObserver(observer); Shizuku.removeRequestPermissionResultListener(permissionResult) }
     }
     LaunchedEffect(model.notice) {
         if (model.notice.isNotEmpty()) { val message = model.notice; model.clearNotice(); snackbar.showSnackbar(message) }
@@ -177,8 +188,6 @@ private val Accent = Color(0xFF88ABFF)
                     Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
                         Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.padding(28.dp)) {
                             Text("PhoneBot", fontSize = 30.sp, fontWeight = FontWeight.SemiBold)
-                            Spacer(Modifier.height(24.dp))
-                            if (model.provider.isEmpty()) TextButton(onClick = { panel = "providers"; model.catalog() }) { Text("选择模型", fontSize = 16.sp) }
                         }
                     }
                 } else LazyColumn(state = list, modifier = Modifier.weight(1f).fillMaxWidth(), contentPadding = PaddingValues(start = 22.dp, end = 22.dp, top = 24.dp, bottom = 18.dp), verticalArrangement = Arrangement.spacedBy(30.dp)) {
@@ -239,6 +248,7 @@ private val Accent = Color(0xFF88ABFF)
                                 SettingsRow(if (permission.id in setOf("notifications", "task_results")) Icons.Outlined.Notifications else Icons.Outlined.Lock, permission.name, if (permission.granted) "已开启" else "待授权") {
                                     if (permission.id == "notifications" && PhonePermissions.notificationPermission() != null && !permission.granted)
                                         (context as? ComponentActivity)?.requestPermissions(arrayOf(PhonePermissions.notificationPermission()!!), 1)
+                                    else if (permission.id == "shizuku" && Shizuku.pingBinder() && !permission.granted) Shizuku.requestPermission(2)
                                     else context.startActivity(PhonePermissions.settings(context, permission.id))
                                 }
                                 Text(permission.purpose, color = Muted, fontSize = 14.sp, modifier = Modifier.padding(start = 58.dp, end = 16.dp, bottom = 18.dp))
@@ -271,26 +281,63 @@ private val Accent = Color(0xFF88ABFF)
 }
 
 @Composable private fun Composer(model: PhoneBotModel, phase: EnginePhase, chooseModel: () -> Unit) {
+    TaskComposer(model.model.ifEmpty { if (phase == EnginePhase.STARTING) "正在启动" else "选择模型" }, model.models.takeIf { model.modelProvider == model.provider }.orEmpty(),
+        model.activeTask.isNotEmpty(), phase == EnginePhase.READY,
+        { if (model.provider.isNotEmpty()) model.catalog(model.provider) },
+        { model.choose(model.provider, it) }, chooseModel, model::submit, model::cancel)
+}
+
+@Composable internal fun TaskComposer(modelName: String, models: List<PiModel>, busy: Boolean, ready: Boolean,
+    loadModels: () -> Unit, choose: (String) -> Unit, configure: () -> Unit, submit: (String) -> Boolean, cancel: () -> Unit) {
     var input by rememberSaveable { mutableStateOf("") }
-    val send = { if (model.submit(input.trim())) input = "" }
-    Column(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 10.dp).clip(RoundedCornerShape(28.dp)).background(Color(0xFF252525)).padding(12.dp)) {
-        BasicTextField(input, { if (it.length <= 12000) input = it }, modifier = Modifier.fillMaxWidth().padding(8.dp).heightIn(min = 42.dp, max = 150.dp),
-            textStyle = MaterialTheme.typography.bodyLarge.copy(color = MaterialTheme.colorScheme.onSurface, fontSize = 17.sp), cursorBrush = SolidColor(Accent),
-            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send), keyboardActions = KeyboardActions(onSend = { send() }),
-            decorationBox = { inner -> Box { if (input.isEmpty()) Text("发消息", color = Muted, fontSize = 17.sp); inner() } })
-        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-            TextButton(onClick = chooseModel, modifier = Modifier.weight(1f), contentPadding = PaddingValues(horizontal = 8.dp)) {
-                Text(model.model.ifEmpty { if (phase == EnginePhase.STARTING) "正在启动" else "选择模型" }, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f), textAlign = androidx.compose.ui.text.style.TextAlign.Start, color = if (model.model.isEmpty()) Muted else Accent, fontSize = 14.sp)
-                Icon(Icons.Outlined.KeyboardArrowDown, null, modifier = Modifier.size(18.dp))
+    var expanded by remember { mutableStateOf(false) }
+    val focus = LocalFocusManager.current
+    val keyboard = LocalSoftwareKeyboardController.current
+    val send = {
+        if (!busy && ready && input.isNotBlank() && submit(input.trim())) {
+            input = ""
+            focus.clearFocus()
+            keyboard?.hide()
+        }
+    }
+    Column(Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        Box {
+            OutlinedButton(onClick = { expanded = true; loadModels() }, enabled = !busy && ready, shape = RoundedCornerShape(16.dp),
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant), contentPadding = PaddingValues(horizontal = 14.dp, vertical = 10.dp),
+                modifier = Modifier.widthIn(max = 280.dp).heightIn(min = 48.dp)) {
+                Text(modelName, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false), color = MaterialTheme.colorScheme.onSurface, fontSize = 14.sp)
+                Icon(Icons.Outlined.KeyboardArrowDown, "选择模型", modifier = Modifier.padding(start = 8.dp).size(18.dp))
             }
-            Spacer(Modifier.width(16.dp))
-            val busy = model.activeTask.isNotEmpty()
-            FilledIconButton(onClick = if (busy) model::cancel else send, enabled = busy || (input.isNotBlank() && phase == EnginePhase.READY),
-                shape = CircleShape, modifier = Modifier.size(48.dp).semantics { contentDescription = if (busy) "停止任务" else "发送任务" }, colors = IconButtonDefaults.filledIconButtonColors(containerColor = Color(0xFFF2F2F2), contentColor = Background)) {
-                if (busy) Box(Modifier.size(14.dp).background(Background, RoundedCornerShape(2.dp)))
-                else Icon(Icons.AutoMirrored.Filled.ArrowForward, "发送任务", modifier = Modifier.rotate(-90f))
+            DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }, modifier = Modifier.widthIn(max = 320.dp).heightIn(max = 360.dp)) {
+                models.forEach { item -> DropdownMenuItem(text = { Text(item.name, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                    trailingIcon = { if (item.id == modelName) Icon(Icons.Outlined.Check, null, tint = Accent) },
+                    onClick = { choose(item.id); expanded = false }) }
+                HorizontalDivider()
+                DropdownMenuItem(text = { Text("管理模型服务") }, onClick = { expanded = false; configure() })
             }
         }
+        val style = MaterialTheme.typography.bodyLarge.copy(color = MaterialTheme.colorScheme.onSurface, fontSize = 17.sp, lineHeight = 25.sp)
+        val measurer = rememberTextMeasurer()
+        val density = LocalDensity.current
+        BoxWithConstraints(Modifier.fillMaxWidth().clip(RoundedCornerShape(28.dp)).background(Color(0xFF252525))
+            .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(28.dp)).testTag("composer")) {
+            val width = with(density) { (maxWidth - 88.dp).roundToPx().coerceAtLeast(1) }
+            val multiline = input.isNotEmpty() && measurer.measure(input, style, constraints = Constraints(maxWidth = width)).lineCount > 1
+            BasicTextField(input, { if (it.length <= 12000) input = it }, maxLines = 5,
+                modifier = Modifier.fillMaxWidth().padding(start = 18.dp, end = if (multiline) 18.dp else 68.dp,
+                    top = 16.dp, bottom = if (multiline) 64.dp else 16.dp).testTag("task_input"),
+                textStyle = style, cursorBrush = SolidColor(Accent), keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
+                keyboardActions = KeyboardActions(onSend = { send() }),
+                decorationBox = { inner -> Box { if (input.isEmpty()) Text("给我布置一个任务", color = Muted, style = style); inner() } })
+            FilledIconButton(onClick = if (busy) cancel else send, enabled = busy || (input.isNotBlank() && ready),
+                shape = CircleShape, modifier = Modifier.align(Alignment.BottomEnd).padding(6.dp).size(48.dp)
+                    .semantics { contentDescription = if (busy) "停止任务" else "发送任务" },
+                colors = IconButtonDefaults.filledIconButtonColors(containerColor = Color(0xFFF2F2F2), contentColor = Background)) {
+                if (busy) Box(Modifier.size(14.dp).background(Background, RoundedCornerShape(2.dp)))
+                else Icon(Icons.AutoMirrored.Filled.ArrowForward, null, modifier = Modifier.rotate(-90f))
+            }
+        }
+        Text("内容由 AI 生成，请注意核实", color = Muted.copy(alpha = .7f), fontSize = 11.sp, modifier = Modifier.align(Alignment.CenterHorizontally))
     }
 }
 
@@ -334,6 +381,7 @@ private val Accent = Color(0xFF88ABFF)
         }
         if (running && turn.answer.isEmpty() && turn.steps.isEmpty()) CircularProgressIndicator(Modifier.size(18.dp), color = Muted, strokeWidth = 2.dp)
         if (turn.status in listOf("stopped", "interrupted")) Text(if (turn.status == "stopped") "已停止" else "任务已中断", fontSize = 13.sp, color = Muted)
+        if (turn.status in listOf("partial", "blocked")) Text(if (turn.status == "partial") "部分完成" else "任务受阻", fontSize = 13.sp, color = Muted)
     }
 }
 
