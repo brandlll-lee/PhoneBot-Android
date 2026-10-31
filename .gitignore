@@ -5,6 +5,14 @@
 **/build/
 **/.cxx/
 local.properties
+.env
+.env.*
+key.properties
+*.jks
+*.keystore
+*.p12
+*.pfx
+*.pem
 references/
 runtime/node_modules/
 runtime/dist/

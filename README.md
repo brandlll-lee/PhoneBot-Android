@@ -1,66 +1,107 @@
-# PhoneBot Android
+<p align="center">简体中文 · <a href="README.en.md">English</a></p>
 
-PhoneBot runs Pi Agent Core inside an Android APK. Kotlin hosts the engine in a separate process. A Compose chat controls tasks on the unlocked main display.
+<h1 align="center">PhoneBot</h1>
+<h3 align="center">你的 AI，现在会用手机了。</h3>
 
-## Build
+<p align="center">
+住在你手机里的 AI 搭档。替你操作手机，处理日常事务。<br />
+你交代，它执行。
+</p>
 
-Use Windows, JDK 21, and Node 22.19 or later. Set `JAVA_HOME` to a JDK. Set `ANDROID_HOME` to the SDK in `.tools/android-sdk`, or set `sdk.dir` in `local.properties`.
+<p align="center">
+<a href="#快速开始">快速开始</a> ·
+<a href="#能做什么">能做什么</a> ·
+<a href="#常见问题">常见问题</a> ·
+<a href="#开发">从源码构建</a>
+</p>
 
-Install these SDK packages with Android Studio or the Android CLI:
+**无需 Root 或 Termux，运行环境内置 APK。** 连接模型、开启无障碍，即可开始操作手机。Shizuku 可选，用于系统命令和直接切换 Wi-Fi 等能力。
 
-```powershell
-android --sdk="$PWD/.tools/android-sdk" sdk install 'platform-tools' 'platforms;android-37.0' 'build-tools;36.0.0' 'ndk;28.2.13676358' 'cmake;3.31.6'
-```
+## 演示
 
-Run from the repository root:
+## 能做什么
 
-```powershell
-./scripts/gradle.ps1
-```
+- **用你选择的模型。** 复用 Pi 的服务商、模型目录、认证和请求能力。在输入框上方切换模型，凭据加密保存在手机上。
+- **替你操作手机。** 打开 App、读取页面、点击、滑动、输入中文、返回和回到主页。需要时使用中英文 OCR 或截图理解页面。
+- **处理日常设置。** 查询和调节媒体音量、设置亮度、打开系统设置入口。闹钟、计时器和日程通过系统应用办理。
+- **看清执行过程。** 展开记录，查看模型返回的思考、中间文本、工具调用和结果。最终回复支持 Markdown、表格和代码块。
+- **随时停止。** 一次执行一个任务。缺少权限时暂停。你可以停止当前任务，任务结束后可通过通知返回对应会话。
 
-This command builds the APK and runs JVM tests and lint. Gradle downloads the pinned Node Android archive, verifies its SHA-256, installs locked npm packages, and bundles the runtime. The first build needs network access.
+## 快速开始
 
-APK: `app/build/outputs/apk/debug/app-debug.apk`.
+当前请使用维护者提供的测试 APK，或[从源码构建](docs/build.md)。
 
-The wrapper defaults to `.tools/gradle-home` and `.tools/android-user`. The PowerShell entry point also places npm caches and virtual devices under `.tools/`. These paths stay on the project drive. `runtime/.npmrc` sets the npm cache for commands run in `runtime/`.
+### 1. 安装并打开
 
-## Run
+将 APK 下载到手机，在文件管理器中点击安装。按系统提示允许该文件管理器安装应用。打开 PhoneBot，内置引擎会自动启动。
 
-Install the APK on Android 9 or later. Supported ABIs are ARM64 and x86-64.
+### 2. 连接模型
 
-1. Open PhoneBot. The foreground engine starts with the app.
-2. Open **设置 → 模型服务**. Select a Pi provider. Use its API-key or browser login flow. Select a model. Press **验证连接** to send a small real request. Provider charges can apply.
-3. Open **设置 → 权限**. Enable the accessibility service. Keep the display on and unlocked. Enable notifications and the **任务结果横幅** channel to receive task results. Tap a result notification to open its conversation and task.
-4. Use the model button above the input to select a model from the current provider. Use **管理模型服务** to configure providers. Enter a task. The input grows to five visible lines. Accepted sends clear the input and close the keyboard. Expand execution steps to inspect tool results. Use the square Stop control to cancel the task. A permission pause offers an explicit resume control after authorization.
-5. Use the drawer to find or delete conversations. Use **设置 → 停止引擎** to end the engine process. Use **启动引擎** to start a fresh process.
+打开 **设置 → 模型服务**，选择服务商，按提示填写 API Key 或使用该服务商提供的账号登录。选择模型，点击 **验证连接**。
 
-Pi supplies the provider catalog, authentication flows, token refresh, model requests, and agent loop. Android encrypts API keys and OAuth credentials with Keystore. Provider and model defaults survive restart. A successful connection check marks that exact model as verified on this installation. Other entries remain unverified.
+模型需支持工具调用。使用截图理解页面时，还需支持图片输入。模型目录来自 Pi，具体认证方式由服务商决定。连接验证成功只代表该模型和当前凭据能发起请求，不代表所有手机任务都能完成。
 
-The tools read accessibility elements, capture screenshots, recognize Chinese and English text, list and open apps, tap, swipe, enter Chinese text, go Back, and go Home. Input includes a read-back check. Actions return screen changes with a snapshot baseline. `do_steps` runs predictable actions locally and stops on a failed check or detected dialog. All coordinates use the full main display. Screenshots and OCR require Android 11 or later. Images use JPEG quality 80 and a longest edge of 1280 pixels. Image results require a vision model. Secure windows can block screenshots.
+### 3. 开启权限
 
-An unavailable accessibility tree returns an empty observation. Screenshot, Home, and app launch remain available. A dispatched action and a verified goal have separate results. Unknown navigation stops the batch for review. It does not by itself mark the action as failed.
+打开 **设置 → 权限**，开启 **无障碍服务**。操作其他 App 时，保持手机亮屏并解锁。
 
-Readings include all visible accessibility elements, their parent relationships, labels, and scrollable/selected/checked states. Action results separate dispatch, observed UI change, and condition status before and after the action. A condition that already matched on an unchanged page returns that fact for Pi to review. Previous tasks supply historical facts and image references. The current task supplies live screen targets.
+按需开启 **通知权限** 和 **任务结果横幅**，接收任务结果。调节亮度需要 **修改系统设置** 权限。基础手机操作不要求 Shizuku。
 
-System tools read and set media volume, brightness, and Wi-Fi. Brightness needs **修改系统设置** authorization. Direct Wi-Fi changes and system commands need a running, authorized [Shizuku](https://shizuku.rikka.app/guide/setup/) connection. Otherwise, Wi-Fi opens the system panel for user or UI action. Commands use the connection's shell or root privileges. They have a ten-second execution limit and a 32768-character output limit. Commands cannot bypass Android's permission rules.
+### 4. 发出第一个任务
 
-Alarm, timer, and calendar tools use standard Android intents. They open the system handler and report that the result still needs verification. `app_send_intent` dispatches Android actions with scalar extras. `phone_open_link` opens supported links or standard sound, display, network, and app-detail settings pages.
+先试一个容易核对的任务：
 
-Pi receives the user's original message and runs its agent loop. Tool results return to the model. Its final reply ends execution and becomes the displayed answer. A result notification means execution ended. The reply explains what succeeded or remains unresolved. Input read-back, system-state read-back, and action postconditions run inside their tools.
+> 把媒体音量设为 30%。
 
-Assistant replies render as Markdown, including lists, links, tables, and highlighted code with Copy. Intermediate text, returned thinking, and tools appear in an ordered execution trace. It expands during execution and collapses after execution. The final reply stays outside it. Task completion posts one result notification in foreground or background. A stable page means its tree is quiet. Actions use explicit postconditions to verify loaded results. Earlier screen images remain available by reference instead of entering every new task's requests.
+也可以尝试：
 
-Page text and images can reach the selected model provider during a task. Context budgets limit old images and compress older tool rounds. Pi transcripts remain separate from the model request view. Credential login stays outside the conversation. Local conversations, task event journals, and screenshots remain in app-private storage. Task journals retain request timing, payload size, tool results, errors, and interrupted work. Delete a conversation through its drawer menu to remove its transcript and journals. Screenshot cache entries expire as new captures replace them.
+> 打开系统显示设置。
 
-**设置 → 运行自检** uses a local HTTP fixture and the `runtime_info` host tool. It verifies embedded Node, Pi transport, and the tool round trip. It does not validate a cloud account.
+> 打开相册，告诉我当前页面有哪些入口。
 
-## Development
+输入框上方的按钮用于切换当前服务商的模型。发送后，键盘会收起。展开执行记录可查看每一步；点击方形停止按钮可取消任务。任务暂停后，先完成授权，再点击继续。
 
-```powershell
-npm --prefix runtime ci --registry=https://registry.npmjs.org --cache .tools/npm-cache
-npm --prefix runtime run build
-npm --prefix runtime test
-./scripts/gradle.ps1 connectedDebugAndroidTest
-```
+## 运行要求与当前状态
 
-Use a connected device or a running emulator for instrumentation tests. See [verification](docs/verification.md) for acceptance checks. Read [runtime design and primary sources](docs/runtime.md) before changing the engine. Read the [interface contract](docs/interface.md) before changing Compose screens.
+| 项目 | 说明 |
+| --- | --- |
+| 系统 | Android 9 及以上；截图和 OCR 需要 Android 11 及以上 |
+| 架构 | ARM64 手机、x86-64 设备及模拟器 |
+| 模型 | 需要可用的模型服务和网络连接；费用与额度由服务商决定 |
+| 手机操作 | 当前使用亮屏、解锁后的主屏，会占用该屏幕 |
+| 可选系统能力 | 直接切换 Wi-Fi 和执行系统命令需要已启动并授权的 Shizuku |
+| 验证设备 | Samsung S21（Android 14、ARM64）和 Android 16 x86-64 模拟器 |
+
+项目处于早期测试阶段。模型、手机系统和第三方 App 页面都会影响执行效果。Pi 目录中的服务商和模型尚未逐一完成 Android 实测。虚拟屏、熄屏执行和远程接管尚未提供。详细验证范围见[测试记录](docs/verification.md)。
+
+## 数据与隐私
+
+- 任务请求发给你配置的模型服务商。任务涉及的屏幕文字和截图可能随请求发送。
+- API Key 和登录凭据通过 Android Keystore 加密保存在手机上。
+- 对话、执行日志和截图保存在应用私有目录。日志会保留页面信息，分享前请检查并脱敏。
+- 在侧栏删除会话，会同时删除关联的执行日志、Pi 对话记录和图片存档。
+
+## 常见问题
+
+**需要电脑、Root 或 Termux 吗？**
+
+基础使用不需要。安装 APK 后，在手机上连接模型并开启无障碍即可。源码构建需要电脑。
+
+**引擎在手机上运行，是否代表模型也离线运行？**
+
+PhoneBot 在手机上运行 Pi 引擎。模型推理由你配置的服务商处理。连接模型通常需要联网。
+
+**如何排查运行问题？**
+
+先在 **设置 → 运行自检** 检查内置引擎和工具通信。再到 **模型服务 → 验证连接** 检查真实模型请求。自检使用本地测试服务，不消耗云端模型额度，也不能代替模型连接验证。
+
+## 开发
+
+PhoneBot 使用 Kotlin + Jetpack Compose。独立引擎进程内嵌 Node 和 Pi Agent Core。Pi 负责模型请求和执行循环，Kotlin 提供 Android 工具。
+
+- [构建指南](docs/build.md)：Windows 工具链、APK 生成和开发命令。
+- [运行设计](docs/runtime.md)：进程、Pi 接入、工具、权限和数据存储。
+- [界面设计](docs/interface.md)：聊天、执行记录、输入框和设置交互。
+- [测试与验收](docs/verification.md)：测试命令、设备记录和验证边界。
+
+反馈问题时，请提供 PhoneBot 版本、手机型号、Android 版本、服务商与模型、任务原文和失败步骤。分享日志前，请移除密钥、登录凭据和个人信息。
