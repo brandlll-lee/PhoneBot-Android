@@ -3,12 +3,12 @@ import { createServer } from "node:http";
 export async function startFixture({ hang = false, fail = false, tool = "runtime_info", params = {}, turns } = {}) {
   let requests = 0;
   let toolResult;
-  let messages;
+  let payload;
   const server = createServer(async (request, response) => {
     const chunks = [];
     for await (const chunk of request) chunks.push(chunk);
     const body = JSON.parse(Buffer.concat(chunks).toString());
-    messages = body.messages;
+    payload = body;
     requests++;
     if (hang) return;
     if (fail) { response.writeHead(401); response.end('{"error":{"message":"Fixture rejected request"}}'); return; }
@@ -29,7 +29,8 @@ export async function startFixture({ hang = false, fail = false, tool = "runtime
   return {
     baseUrl: `http://127.0.0.1:${server.address().port}/v1`,
     evidence: () => ({ requests, toolResult }),
-    get messages() { return messages; },
+    get messages() { return payload?.messages; },
+    get payload() { return payload; },
     close: () => { server.closeAllConnections(); server.close(); },
   };
 }

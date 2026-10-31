@@ -49,7 +49,7 @@ export function repairHistory(messages) {
 function conversationFacts(messages) {
   const outcome = (value) => Object.fromEntries(["ok", "executed", "changed", "conditionBefore", "conditionMet", "stopReason", "inputVerified", "canContinue", "remaining", "error"].filter((k) => k in value).map((k) => [k, value[k]]));
   const conversation = messages.flatMap((m) => {
-    if (m.role === "user") return [m];
+    if (m.role === "system" || m.role === "user") return [m];
     if (m.role !== "assistant" || m.content.some((b) => b.type === "toolCall") || !textOf(m)) return [];
     return [{ ...m, content: [{ type: "text", text: `Previous reply (historical):\n${textOf(m)}` }] }];
   });
@@ -96,8 +96,11 @@ export function contextManager(model, report = () => {}, historyLength = 0) {
   }
   function project(messages) {
     if (historyLength) {
-      prior ??= conversationFacts(messages.slice(0, historyLength));
-      messages = [...prior, ...messages.slice(historyLength)];
+      let count = 0;
+      const boundary = messages.findIndex((m) => m.role !== "system" && count++ === historyLength);
+      const end = boundary < 0 ? messages.length : boundary;
+      prior ??= conversationFacts(messages.slice(0, end));
+      messages = [...prior, ...messages.slice(end)];
     }
     let sent = base ? [...base, ...messages.slice(covered)] : messages;
     const ceiling = Math.max(256, Math.min(model.contextWindow * 0.6, model.contextWindow - Math.min(model.maxTokens, model.contextWindow / 4)));

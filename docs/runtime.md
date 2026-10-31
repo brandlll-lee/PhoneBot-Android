@@ -44,6 +44,8 @@ Pi's dynamic catalogs use an app-private `ModelsStore`. The UI reads catalog pag
 
 The host entry point validates task identity, cancellation, permission state, and the execution deadline. Missing accessibility or a locked display pauses the pending tool. The UI rechecks permissions on resume. The user resumes the task explicitly.
 
+The system prompt directs Pi to choose entry points from the current page. It uses parent/child labels and interactive states to interpret controls. It scrolls relevant lists when the target is outside the visible items. Insufficient tree data calls for OCR or a screenshot. An action with no progress calls for a different target or method. Final replies distinguish a target not found in the checked pages from confirmed absence. Pi owns the decisions and the execution loop.
+
 `ScreenState` owns display geometry, element identity, snapshots, and diffs. Coordinates use the rotated main display's logical pixels, including system bars. Display size comes from `Display.getRealSize`, not application resource metrics. This use concerns gesture coordinates, not UI layout. The snapshot separately reports full display, active window, and root content bounds. Rotation or a window change resets the element registry. Screenshot metadata maps the encoded image back to screen pixels. OCR boxes use the same mapping.
 
 `screen_read` returns all visible elements exposed by the active accessibility tree. Each element has a monotonic ID, parent ID, resource ID, label, bounds, and interaction state. Empty container labels collect child labels. Elements include scrollable, selected, and checked state. The same complete collection supplies target resolution and conditions. Current IDs remain usable even when the retired-ID cache rotates. The registry matches refreshed nodes and semantic features. Editable text is excluded from identity. Unrelated element changes preserve the target's ID. Actions refresh and validate the target before dispatch. Ambiguous or missing targets require a new read. Password nodes hide their content.
@@ -92,6 +94,8 @@ On engine restart, unfinished journals receive an `interrupted` event. Recovery 
 
 `context.mjs` projects history through Pi's `transformContext`. At each task boundary, prior tasks become conversation text and historical tool facts. Their screen arrays, element IDs, coordinates, and tool calls stay in the transcript. They do not serve as current targets in the next request. Historical facts retain dispatch and condition outcomes, system-tool data, and image recall references. User reference images remain available. Pi receives the original current user message and the current task's complete tool rounds.
 
+The restored conversation count excludes system messages. Pi inserts the current system message with its tool declarations before projection. The projection counts conversation messages to locate the task boundary. Both task-boundary projection and pressure-driven compression preserve system messages unchanged and in order. This includes Pi's tool declarations. Pi's transport resolves them into each provider's request format.
+
 Normal requests within a task preserve their existing prefix and use a stable session ID. Estimated input above 60% of the context window triggers summaries of old tool outcomes and target arguments. Summaries distinguish dispatch from condition satisfaction. Compression keeps four, two, or one recent complete tool rounds as needed. The materialized full baseline for retained diffs survives. The original Pi history is preserved. Input estimates are calibrated from provider usage. Output space is reserved. An input that still exceeds the estimated capacity fails with a clear error.
 
 Images follow model catalog limits and local budgets of eight images and 4 MiB of encoded image data per request. The projection checks per-message counts and decoded image bytes. Old tool images become placeholders when needed. User input is retained. User images that exceed these limits produce an error. Pi's payload hook checks the serialized request against the catalog's byte limit before transport. Unknown provider limits remain unknown. The provider still owns its final acceptance limits.
@@ -113,6 +117,8 @@ Connection verification uses the selected Pi model and saved credentials. It sen
 Checked on 2026-10-31. Read the linked source again when changing the related dependency or API.
 
 Rechecked on 2026-11-01: Pi's `transformContext` contract and Android node parent/child, selected, checked, scrollable, and action-result APIs.
+
+Pi 1.4.0's [Agent initialization](https://github.com/earendil-works/pi/blob/v1.4.0/packages/agent/src/agent.ts) inserts the leading system message. Its [transcript functions](https://github.com/earendil-works/pi/blob/v1.4.0/packages/ai/src/utils/transcript.ts) carry tool declarations in system messages and resolve them in transcript order.
 
 - [AGP 9.2 compatibility](https://developer.android.com/build/releases/agp-9-2-0-release-notes): Gradle 9.4.1, built-in Kotlin, NDK, and supported API level.
 - [Compose compiler setup](https://developer.android.com/develop/ui/compose/compiler): Compose compiler plugin and Kotlin version alignment.

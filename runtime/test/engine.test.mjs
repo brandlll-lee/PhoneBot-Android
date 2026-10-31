@@ -4,15 +4,20 @@ import { spawn } from "node:child_process";
 import { createInterface } from "node:readline";
 import { once } from "node:events";
 import { homedir } from "node:os";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { startFixture } from "../src/fixture.mjs";
 
 function engine(t, entry = "src/main.mjs", baseUrl) {
   const args = baseUrl ? ["--input-type=module", "--eval", `
+    process.argv[2] = "0";
+    process.argv[3] = "1";
     const transport = globalThis.fetch;
     globalThis.fetch = (url, options) => transport(String(url).replace("https://api.deepseek.com", ${JSON.stringify(baseUrl)}), options);
     await import(${JSON.stringify(new URL(`../${entry}`, import.meta.url).href)});
   `] : [entry];
-  const child = spawn(process.execPath, args, { stdio: ["pipe", "pipe", "pipe"], env: { ...process.env, HOME: process.env.HOME ?? homedir() } });
+  const home = baseUrl ? mkdtempSync(fileURLToPath(new URL("../../.tools/engine-test-", import.meta.url))) : process.env.HOME ?? homedir();
+  const child = spawn(process.execPath, args, { stdio: ["pipe", "pipe", "pipe"], env: { ...process.env, HOME: home } });
   const events = [];
   const seen = [];
   const readers = [];
@@ -28,7 +33,7 @@ function engine(t, entry = "src/main.mjs", baseUrl) {
     readers.splice(0).forEach((notify) => notify());
   });
   const exited = once(child, "exit");
-  t.after(() => child.kill());
+  t.after(async () => { child.kill(); await exited; if (baseUrl) rmSync(home, { recursive: true, force: true }); });
   return {
     send: (command) => child.stdin.write(`${JSON.stringify(command)}\n`),
     async next(type) {
@@ -45,6 +50,7 @@ function engine(t, entry = "src/main.mjs", baseUrl) {
     },
     exited,
     seen,
+    transcript: () => JSON.parse(readFileSync(`${home}/transcripts/conversation.json`, "utf8")),
   };
 }
 
@@ -80,12 +86,22 @@ for (const entry of ["src/main.mjs", "dist/engine.mjs"]) {
     assert.ok(host.seen.indexOf(progress) < host.seen.findIndex((e) => e.type === "step"));
     assert.equal(host.seen.find((e) => e.type === "step").label, "设置媒体音量");
     assert.equal(fixture.evidence().requests, 2);
+    const tools = fixture.payload.tools;
+    const system = fixture.messages.find((m) => m.role === "system");
+    assert.equal(tools.length, 21);
+    assert.ok(system.content.includes("unlocked Android"));
     assert.deepEqual(fixture.messages.findLast((m) => m.role === "user").content, [{ type: "text", text: "将媒体音量设为适中" }]);
     await host.next("idle");
     run("在吗");
     const chat = await host.next("result");
     assert.equal(chat.text, "在的。");
     assert.equal(fixture.evidence().requests, 3);
+    assert.equal(fixture.payload.tools?.length, tools.length);
+    assert.deepEqual(fixture.payload.tools, tools);
+    assert.deepEqual(fixture.messages.find((m) => m.role === "system"), system);
+    assert.ok(fixture.messages.some((m) => m.role === "assistant" && JSON.stringify(m.content).includes("Previous reply (historical)")));
+    assert.ok(!fixture.messages.some((m) => m.role === "tool"));
+    assert.ok(host.transcript().some((m) => m.role === "toolResult" && m.toolName === "volume_set"));
     assert.deepEqual(fixture.messages.findLast((m) => m.role === "user").content, [{ type: "text", text: "在吗" }]);
     assert.equal(host.seen.filter((e) => e.taskId === chat.taskId && e.type === "tool").length, 0);
     await host.next("idle");
@@ -96,6 +112,8 @@ for (const entry of ["src/main.mjs", "dist/engine.mjs"]) {
     const unavailable = await host.next("result");
     assert.equal(unavailable.text, "手机上没有找到该应用。");
     assert.equal(fixture.evidence().requests, 5);
+    assert.deepEqual(fixture.payload.tools, tools);
+    assert.deepEqual(fixture.messages.find((m) => m.role === "system"), system);
     await host.next("idle");
     for (const task of [result, chat, unavailable]) {
       assert.equal(host.seen.filter((e) => e.taskId === task.taskId && ["result", "error", "cancelled"].includes(e.type)).length, 1);
