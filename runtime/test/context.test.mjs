@@ -16,6 +16,28 @@ test("context keeps prefixes unchanged until a budget is reached", () => {
   assert.deepEqual(history, first);
 });
 
+test("a new task keeps conversation facts and image references apart from live screen targets", () => {
+  const reference = "b".repeat(64);
+  const history = [user("打开音乐"), { ...call("old"), content: [{ ...call("old").content[0], arguments: { element: "e551", x: 80, y: 150 } }] },
+    result("old", { kind: "full", snapshot: 99, package: "music", executed: true, conditionMet: false, stopReason: "timeout", elements: [{ id: "e551", text: "旧页面" }] }),
+    { role: "assistant", content: [{ type: "text", text: "没有找到排行。" }], timestamp: 1 }];
+  history[2].content.push({ type: "text", text: `Archived screen image: ${reference}. Use image_recall to inspect it.` });
+  history.push(call("batch"), result("batch", { ok: true, canContinue: false, remaining: 1,
+    steps: [{ tool: "tap", executed: true, conditionMet: false, stopReason: "timeout" }], screen: { kind: "diff", updated: [{ id: "e552" }] } }));
+  const original = structuredClone(history);
+  const context = contextManager(model, () => {}, history.length);
+  const current = [user("继续查找"), call("now"), result("now", { kind: "full", snapshot: 100, elements: [{ id: "e700", text: "当前页面" }] })];
+  const sent = context.project([...history, ...current]).messages;
+  const prior = JSON.stringify(sent.slice(0, -current.length));
+  assert.ok(!prior.includes("e551") && !prior.includes("旧页面"));
+  assert.ok(prior.includes("没有找到排行") && prior.includes('conditionMet') && prior.includes("timeout") && prior.includes(reference));
+  const facts = sent.find((m) => typeof m.content === "string" && m.content.startsWith("Historical execution facts")).content;
+  assert.ok(facts.includes('"remaining":1') && facts.includes('"executed":true') && !prior.includes("e552"));
+  assert.deepEqual(sent.slice(-current.length), current);
+  assert.deepEqual(context.project([...history, ...current, user("再看看")]).messages.slice(0, sent.length), sent);
+  assert.deepEqual(history, original);
+});
+
 test("image budget removes oldest tool images and preserves original transcript", () => {
   const context = contextManager({ ...model, inputLimits: { images: { maxPerRequest: 1 } } });
   const old = result("a", {}), latest = result("b", {});

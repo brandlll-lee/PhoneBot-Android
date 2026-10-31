@@ -146,7 +146,7 @@ async function run(command) {
     let history = [];
     if (sessionFile && existsSync(sessionFile)) history = repairHistory(JSON.parse(readFileSync(sessionFile, "utf8")).filter((m) => m.role !== "system"));
     const images = imageStore(join(process.env.HOME, "images", command.session || "probe"), command.session, (name, params) => host(name, params, signal), history);
-    const context = contextManager(model, (event) => send({ ...event, taskId: id }));
+    const context = contextManager(model, (event) => send({ ...event, taskId: id }), history.length);
     let request = 0, began = 0, first = false, projected;
     const toolTimes = new Map();
     const firstResponse = () => {

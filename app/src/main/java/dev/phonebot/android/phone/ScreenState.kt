@@ -63,24 +63,26 @@ internal class ScreenState(private val service: AccessibilityService) {
         geometry = ScreenGeometry.read(service, root)
         val nextScope = "${root?.packageName}:${root?.windowId}:${geometry.width}:${geometry.height}:${geometry.rotation}"
         if (scope != nextScope) { reset(); scope = nextScope }
-        val collected = mutableListOf<Pair<AccessibilityNodeInfo, String>>()
-        var scanned = 0
-        fun visit(node: AccessibilityNodeInfo, ancestry: String) {
-            if (++scanned > 1500) return
-            if (node.isVisibleToUser && (node.text?.isNotBlank() == true || node.contentDescription?.isNotBlank() == true || node.isClickable || node.isEditable || node.isScrollable)) collected += node to ancestry
+        val collected = mutableListOf<Triple<AccessibilityNodeInfo, String, Int?>>()
+        fun visit(node: AccessibilityNodeInfo, ancestry: String, parentIndex: Int?) {
+            var index = parentIndex
+            if (node.isVisibleToUser && (node.text?.isNotBlank() == true || node.contentDescription?.isNotBlank() == true || node.isClickable || node.isEditable || node.isScrollable || node.isCheckable)) {
+                index = collected.size
+                collected += Triple(node, ancestry, parentIndex)
+            }
             val parent = "$ancestry/${node.viewIdResourceName.orEmpty()}:${node.className}"
-            for (index in 0 until node.childCount) node.getChild(index)?.let { visit(it, parent) }
+            for (child in 0 until node.childCount) node.getChild(child)?.let { visit(it, parent, index) }
         }
-        root?.let { visit(it, "") }
-        val old = entries
+        root?.let { visit(it, "", null) }
+        val old = entries.groupBy { it.key }
         val used = mutableSetOf<String>()
-        val identities = collected.take(80).groupingBy { (node, ancestry) -> identity(node, ancestry) }.eachCount()
-        entries = collected.take(80).map { (node, ancestry) ->
+        val identities = collected.groupingBy { (node, ancestry) -> identity(node, ancestry) }.eachCount()
+        entries = collected.map { (node, ancestry) ->
             val text = if (node.isPassword) "[受保护输入]" else node.text?.toString()?.take(120).orEmpty()
             val description = if (node.isPassword) "" else node.contentDescription?.toString()?.take(120).orEmpty()
             val key = identity(node, ancestry)
             val unique = if (Build.VERSION.SDK_INT >= 33) node.uniqueId else null
-            val matches = old.filter { it.id !in used && it.key == key }
+            val matches = old[key].orEmpty().filter { it.id !in used }
             val exact = matches.filter { if (unique != null) it.unique == unique else it.node == node }
             val previous = exact.singleOrNull() ?: matches.singleOrNull()?.takeIf { identities[key] == 1 }
             val id = previous?.id ?: "e${++issued}"
@@ -88,8 +90,15 @@ internal class ScreenState(private val service: AccessibilityService) {
             val bounds = Rect().also(node::getBoundsInScreen)
             val value = JSONObject().put("id", id).put("resourceId", node.viewIdResourceName.orEmpty()).put("text", text).put("description", description)
                 .put("bounds", bounds.json()).put("clickable", node.isClickable).put("editable", node.isEditable).put("enabled", node.isEnabled)
-                .put("focused", node.isFocused).put("selected", node.isSelected).put("class", node.className?.toString())
+                .put("focused", node.isFocused).put("selected", node.isSelected).put("scrollable", node.isScrollable)
+                .put("checkable", node.isCheckable).put("checked", node.isChecked).put("class", node.className?.toString())
             Entry(id, node, key, unique, value)
+        }
+        entries.forEachIndexed { index, entry -> entry.value.put("parent", collected[index].third?.let { entries[it].id } ?: JSONObject.NULL) }
+        val children = entries.groupBy { it.value.optString("parent") }
+        entries.asReversed().forEach { entry ->
+            val own = entry.value.getString("text").ifBlank { entry.value.getString("description") }
+            entry.value.put("label", own.ifBlank { children[entry.id].orEmpty().map { it.value.getString("label") }.filter(String::isNotBlank).distinct().joinToString(" · ") }.take(120))
         }
         entries.forEach { remembered[it.id] = it }
         while (remembered.size > 320) remembered.remove(remembered.keys.first())
@@ -98,14 +107,14 @@ internal class ScreenState(private val service: AccessibilityService) {
             .put("windows", JSONArray(windows.map { window -> JSONObject().put("id", window.id).put("type", window.type)
                 .put("active", window.isActive).put("focused", window.isFocused) }))
             .put("width", geometry.width).put("height", geometry.height).put("geometry", geometry.json())
-            .put("elements", JSONArray(entries.map { it.value })).put("truncated", collected.size > entries.size || scanned > 1500)
+            .put("elements", JSONArray(entries.map { it.value })).put("truncated", false)
         return latest
     }
 
     fun resolve(params: JSONObject): AccessibilityNodeInfo {
         val id = params.optString("element")
         val candidates = if (id.isNotEmpty()) {
-            val original = remembered[id] ?: error("元素编号已过期。请重新读取页面。")
+            val original = entries.find { it.id == id } ?: remembered[id] ?: error("元素编号已过期。请重新读取页面。")
             entries.filter { it.key == original.key }.let { matches ->
                 matches.filter { it.id == id }.singleOrNull()?.let(::listOf) ?: matches
             }
@@ -127,7 +136,7 @@ internal class ScreenState(private val service: AccessibilityService) {
     fun condition(expected: JSONObject): Boolean {
         if (!latest.optBoolean("treeReadable")) return false
         if (expected.has("package") && latest.optString("package") != expected.getString("package")) return false
-        val selectors = listOf("element", "text", "resourceId", "editable", "enabled", "withinResourceId")
+        val selectors = listOf("element", "text", "resourceId", "editable", "enabled", "selected", "checked", "withinResourceId")
         if (selectors.none(expected::has)) return !expected.optBoolean("absent")
         val found = entries.any { entry ->
             val node = entry.node
@@ -137,6 +146,8 @@ internal class ScreenState(private val service: AccessibilityService) {
                 (!expected.has("resourceId") || node.viewIdResourceName == expected.getString("resourceId")) &&
                 (!expected.has("editable") || node.isEditable == expected.getBoolean("editable")) &&
                 (!expected.has("enabled") || node.isEnabled == expected.getBoolean("enabled")) &&
+                (!expected.has("selected") || node.isSelected == expected.getBoolean("selected")) &&
+                (!expected.has("checked") || node.isChecked == expected.getBoolean("checked")) &&
                 (!expected.has("withinResourceId") || entry.key.contains("/${expected.getString("withinResourceId")}:"))
         }
         return found != expected.optBoolean("absent")

@@ -82,13 +82,13 @@ class PhoneAccessibilityService : AccessibilityService() {
 
     private suspend fun read(ocr: Boolean, image: Boolean): JSONObject {
         screen.scan()
-        val result = screen.present(true)
-        if (!ocr && !image) return result
+        if (!ocr && !image) return screen.present(true)
         val geometry = screen.geometry
         val bitmap = capture()
         try {
             screen.scan()
             check(screen.geometry.rotation == geometry.rotation && screen.geometry.width == geometry.width && screen.geometry.height == geometry.height) { "屏幕方向已变化，请重新读屏" }
+            val result = screen.present(true)
             val scaleX = geometry.width.toDouble() / bitmap.width
             val scaleY = geometry.height.toDouble() / bitmap.height
             if (ocr) {
@@ -125,8 +125,8 @@ class PhoneAccessibilityService : AccessibilityService() {
                     .put("width", encoded.getInt("width")).put("height", encoded.getInt("height")).put("sourceWidth", bitmap.width).put("sourceHeight", bitmap.height)
                     .put("screenPerImageX", geometry.width.toDouble() / encoded.getInt("width")).put("screenPerImageY", geometry.height.toDouble() / encoded.getInt("height")))
             }
+            return result
         } finally { bitmap.recycle() }
-        return result
     }
 
     suspend fun execute(name: String, params: JSONObject, report: (JSONObject) -> Unit = {}): JSONObject {

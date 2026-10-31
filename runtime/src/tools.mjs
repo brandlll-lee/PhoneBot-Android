@@ -4,7 +4,8 @@ const text = Type.String({ minLength: 1, maxLength: 4000 });
 const coordinate = Type.Integer({ minimum: 0, maximum: 20000 });
 const target = { element: Type.Optional(text), text: Type.Optional(text), resourceId: Type.Optional(text), x: Type.Optional(coordinate), y: Type.Optional(coordinate) };
 const condition = Type.Object({ element: Type.Optional(text), text: Type.Optional(text), resourceId: Type.Optional(text), package: Type.Optional(text),
-  editable: Type.Optional(Type.Boolean()), enabled: Type.Optional(Type.Boolean()), withinResourceId: Type.Optional(text), absent: Type.Optional(Type.Boolean()) }, { additionalProperties: false, minProperties: 1 });
+  editable: Type.Optional(Type.Boolean()), enabled: Type.Optional(Type.Boolean()), selected: Type.Optional(Type.Boolean()), checked: Type.Optional(Type.Boolean()),
+  withinResourceId: Type.Optional(text), absent: Type.Optional(Type.Boolean()) }, { additionalProperties: false, minProperties: 1 });
 const settings = ["SETTINGS", "WIFI_SETTINGS", "BLUETOOTH_SETTINGS", "SOUND_SETTINGS", "DISPLAY_SETTINGS", "APPLICATION_DETAILS_SETTINGS", "APPLICATION_SETTINGS", "DATE_SETTINGS", "LOCALE_SETTINGS", "DEVICE_INFO_SETTINGS", "LOCATION_SOURCE_SETTINGS", "INTERNAL_STORAGE_SETTINGS", "ACCESSIBILITY_SETTINGS", "BATTERY_SAVER_SETTINGS"].map((s) => `android.settings.${s}`);
 const intent = { action: text, data: Type.Optional(text), type: Type.Optional(text), package: Type.Optional(text),
   extras: Type.Optional(Type.Record(Type.String(), Type.Union([Type.String(), Type.Number(), Type.Boolean()]))) };
@@ -18,12 +19,12 @@ const actions = [
   ["input_text", "输入文字", "Replace editable text and verify read-back. target selects the input's current text or description.", { element: Type.Optional(text), resourceId: Type.Optional(text), target: Type.Optional(text), text }],
   ["back", "返回", "Perform Android Back.", {}],
   ["home", "回到主页", "Go to Android Home.", {}],
-].map(([name, label, description, schema]) => [name, label, `${description} Returns executed, ok, canContinue, navigation, screen changes, treeStable, conditionMet and stopReason. An unplanned navigation stops a batch for review; the dispatched action can still succeed. expect waits for a postcondition; text defaults to non-editable content. Use editable:true for input checks and withinResourceId for a result region. Without expect, tree stability does not mean business readiness.`,
+].map(([name, label, description, schema]) => [name, label, `${description} ok/executed report dispatch, not task success. changed reports observed UI change. conditionBefore/conditionMet report the selector before/after the action. condition_unchanged means it already matched and no UI change was observed; review the screen. canContinue controls remaining batch steps. expect waits for a stable postcondition; select destination content or selected/checked state, not a navigation label already present. Use the direct outcome of this action, not a later task goal. Text defaults to non-editable content. Use editable:true for input checks and withinResourceId for a result region. Unplanned navigation or a dialog stops a batch for review.`,
   { ...schema, expect: Type.Optional(condition), timeoutMs: Type.Optional(Type.Integer({ minimum: 250, maximum: 15000 })) }]);
 const batch = Type.Union(actions.map(([name, , , schema]) => Type.Object({ tool: Type.Literal(name),
   args: Type.Object(schema, { additionalProperties: false }) }, { additionalProperties: false })));
 const definitions = [
-  ["screen_read", "读取页面", "Read full visible elements with stable IDs and screen-pixel bounds. Actions already return screen changes. Read again only for missing or ambiguous evidence. Prefer the tree, then OCR for sparse text, then image for visual content.", { ocr: Type.Optional(Type.Boolean()), image: Type.Optional(Type.Boolean()) }],
+  ["screen_read", "读取页面", "Read all visible elements with stable IDs, parent IDs, labels, scrollable/selected/checked states and screen-pixel bounds. Actions return screen changes. Inspect children and scrollable regions to explore unknown pages; use OCR or an image for unlabeled visual controls.", { ocr: Type.Optional(Type.Boolean()), image: Type.Optional(Type.Boolean()) }],
   ["screenshot", "截取屏幕", "Capture the unlocked main display. Returns an image for vision models.", {}],
   ["app_list", "查看应用", "List launchable apps and package names.", {}],
   ["device_status", "读取设备设置", "Read actual media volume/mute, brightness, Wi-Fi and system-command availability.", {}],

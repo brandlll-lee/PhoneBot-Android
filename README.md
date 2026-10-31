@@ -40,6 +40,8 @@ The tools read accessibility elements, capture screenshots, recognize Chinese an
 
 An unavailable accessibility tree returns an empty observation. Screenshot, Home, and app launch remain available. A dispatched action and a verified goal have separate results. Unknown navigation stops the batch for review. It does not by itself mark the action as failed.
 
+Readings include all visible accessibility elements, their parent relationships, labels, and scrollable/selected/checked states. Action results separate dispatch, observed UI change, and condition status before and after the action. A condition that already matched on an unchanged page returns that fact for Pi to review. Previous tasks supply historical facts and image references. The current task supplies live screen targets.
+
 System tools read and set media volume, brightness, and Wi-Fi. Brightness needs **修改系统设置** authorization. Direct Wi-Fi changes and system commands need a running, authorized [Shizuku](https://shizuku.rikka.app/guide/setup/) connection. Otherwise, Wi-Fi opens the system panel for user or UI action. Commands use the connection's shell or root privileges. They have a ten-second execution limit and a 32768-character output limit. Commands cannot bypass Android's permission rules.
 
 Alarm, timer, and calendar tools use standard Android intents. They open the system handler and report that the result still needs verification. `app_send_intent` dispatches Android actions with scalar extras. `phone_open_link` opens supported links or standard sound, display, network, and app-detail settings pages.

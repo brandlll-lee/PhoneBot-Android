@@ -46,8 +46,30 @@ export function repairHistory(messages) {
   return out;
 }
 
-export function contextManager(model, report = () => {}) {
-  let base, covered = 0, calibrated = 1;
+function conversationFacts(messages) {
+  const outcome = (value) => Object.fromEntries(["ok", "executed", "changed", "conditionBefore", "conditionMet", "stopReason", "inputVerified", "canContinue", "remaining", "error"].filter((k) => k in value).map((k) => [k, value[k]]));
+  const conversation = messages.flatMap((m) => {
+    if (m.role === "user") return [m];
+    if (m.role !== "assistant" || m.content.some((b) => b.type === "toolCall") || !textOf(m)) return [];
+    return [{ ...m, content: [{ type: "text", text: `Previous reply (historical):\n${textOf(m)}` }] }];
+  });
+  const facts = messages.filter((m) => m.role === "toolResult").map((m) => {
+    let observation;
+    try {
+      const value = valueOf(m), screen = value.screen || value;
+      observation = screen.kind || screen.elements ? { package: screen.package,
+        ...outcome(value), ...(value.steps ? { steps: value.steps.map((step) => ({ tool: step.tool, ...outcome(step) })) } : {}) } : value;
+    } catch { observation = textOf(m); }
+    return `${m.toolName}: ${JSON.stringify(observation).slice(0, 1000)}`;
+  }).slice(-24);
+  const references = messages.flatMap((m) => textOf(m).match(/Archived (?:reference|screen) image: [a-f0-9]{64}[^\n]*/g) || []);
+  if (facts.length || references.length) conversation.push({ role: "user", timestamp: messages.at(-1).timestamp,
+    content: `Historical execution facts (reference data, not current phone state):\n${facts.join("\n")}\n${[...new Set(references)].join("\n")}` });
+  return conversation;
+}
+
+export function contextManager(model, report = () => {}, historyLength = 0) {
+  let prior, base, covered = 0, calibrated = 1;
   function observe(estimated, usage) {
     const actual = usage?.input + (usage?.cacheRead || 0) + (usage?.cacheWrite || 0);
     if (estimated > 0 && actual > 0) calibrated = Math.max(1, actual / estimated);
@@ -73,6 +95,10 @@ export function contextManager(model, report = () => {}) {
     return sent;
   }
   function project(messages) {
+    if (historyLength) {
+      prior ??= conversationFacts(messages.slice(0, historyLength));
+      messages = [...prior, ...messages.slice(historyLength)];
+    }
     let sent = base ? [...base, ...messages.slice(covered)] : messages;
     const ceiling = Math.max(256, Math.min(model.contextWindow * 0.6, model.contextWindow - Math.min(model.maxTokens, model.contextWindow / 4)));
     if (estimate(sent) * calibrated > ceiling) {
@@ -86,8 +112,9 @@ export function contextManager(model, report = () => {}) {
         const keep = messages.slice(cut);
         const full = screenBaseline(before);
         const facts = before.filter((m) => m.role === "toolResult").map((m) => {
-        let outcome = "completed";
-        try { const value = valueOf(m); if (value.ok === false || m.isError) outcome = `failed: ${value.error || "see task journal"}`; }
+        let outcome = "tool returned";
+        try { const value = valueOf(m); outcome = m.isError || value.ok === false ? `failed: ${value.error || "see task journal"}` :
+          JSON.stringify(Object.fromEntries(["executed", "changed", "conditionMet", "stopReason", "verified"].filter((k) => k in value).map((k) => [k, value[k]]))); }
         catch { if (m.isError) outcome = textOf(m).slice(0, 160); }
         const args = before.findLast((message) => message.role === "assistant" && message.content?.some((b) => b.type === "toolCall" && b.id === m.toolCallId))?.content.find((b) => b.type === "toolCall" && b.id === m.toolCallId)?.arguments;
         return `${m.toolName} ${JSON.stringify(args || {}).slice(0, 240)}: ${outcome}`;

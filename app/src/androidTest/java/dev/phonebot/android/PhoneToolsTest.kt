@@ -118,7 +118,10 @@ class PhoneToolsTest {
             assertTrue(quiet.getBoolean("treeStable"))
             assertTrue(quiet.isNull("conditionMet"))
             val unmet = call("do_steps", JSONObject("""{"steps":[{"tool":"input_text","args":{"resourceId":"android:id/edit","text":"输入并非结果","expect":{"text":"输入并非结果"},"timeoutMs":500}},{"tool":"home","args":{}}]}"""))
-            assertFalse(unmet.getBoolean("ok"))
+            assertTrue(unmet.getBoolean("ok"))
+            assertTrue(unmet.getJSONArray("steps").getJSONObject(0).getBoolean("executed"))
+            assertFalse(unmet.getJSONArray("steps").getJSONObject(0).getBoolean("conditionMet"))
+            assertFalse(unmet.getBoolean("canContinue"))
             assertEquals("timeout", unmet.getJSONArray("steps").getJSONObject(0).getString("stopReason"))
             assertEquals(1, unmet.getInt("remaining"))
             val stopped = call("do_steps", JSONObject("""{"steps":[{"tool":"tap","args":{"text":"不存在的按钮"}},{"tool":"input_text","args":{"resourceId":"android:id/edit","text":"不应执行"}}]}"""))
@@ -155,7 +158,46 @@ class PhoneToolsTest {
             call("swipe", JSONObject().put("x", width / 2).put("y", height * 3 / 4).put("endX", width / 2).put("endY", height / 2))
             call("home")
             assertEquals(context.packageName, call("app_launch", JSONObject().put("package", context.packageName)).getString("package"))
-            instrumentation.runOnMainSync { activity.finish() }
+            val observationActivity = instrumentation.startActivitySync(Intent().setComponent(ComponentName(context.packageName, "dev.phonebot.android.testing.PhoneTestActivity")).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+            instrumentation.runOnMainSync {
+                val panel = android.widget.LinearLayout(observationActivity).apply { orientation = android.widget.LinearLayout.VERTICAL; setPadding(20, 120, 20, 20) }
+                val grid = android.widget.GridLayout(observationActivity).apply { columnCount = 10 }
+                repeat(100) { i -> grid.addView(android.widget.TextView(observationActivity).apply { text = "$i"; textSize = 12f; minWidth = 48; minHeight = 36 }) }
+                panel.addView(grid)
+                val tab = android.widget.LinearLayout(observationActivity).apply {
+                    id = android.R.id.tabs; isClickable = true
+                    addView(android.widget.TextView(observationActivity).apply { text = "详情" })
+                }
+                tab.setOnClickListener { }
+                panel.addView(tab)
+                observationActivity.setContentView(panel)
+            }
+            screen = call("screen_read")
+            val nodes = screen.getJSONArray("elements").objects()
+            assertTrue(screen.toString(), nodes.size > 100)
+            assertFalse(screen.getBoolean("truncated"))
+            val tab = nodes.single { it.optString("resourceId") == "android:id/tabs" }
+            assertEquals("详情", tab.getString("label"))
+            assertEquals(tab.getString("id"), nodes.single { it.optString("text") == "详情" }.getString("parent"))
+            val existing = call("tap", JSONObject().put("element", tab.getString("id")).put("expect", JSONObject().put("text", "详情")))
+            assertTrue(existing.getBoolean("executed"))
+            assertTrue(existing.getBoolean("conditionBefore"))
+            assertFalse(existing.getBoolean("changed"))
+            assertFalse(existing.getBoolean("canContinue"))
+            assertEquals("condition_unchanged", existing.getString("stopReason"))
+            instrumentation.runOnMainSync {
+                val tab = observationActivity.findViewById<android.view.View>(android.R.id.tabs)
+                tab.setOnClickListener { tab.postDelayed({ tab.isSelected = true }, 1100) }
+            }
+            val selected = call("tap", JSONObject().put("resourceId", "android:id/tabs")
+                .put("expect", JSONObject().put("resourceId", "android:id/tabs").put("selected", true)))
+            assertTrue(selected.getBoolean("treeStable"))
+            assertTrue(selected.getBoolean("conditionMet"))
+            assertFalse(selected.getBoolean("conditionBefore"))
+            assertTrue(selected.getBoolean("changed"))
+            assertTrue(selected.getLong("waitMs") >= 900)
+            assertTrue(call("screen_read").getJSONArray("elements").objects().single { it.optString("resourceId") == "android:id/tabs" }.getBoolean("selected"))
+            instrumentation.runOnMainSync { observationActivity.finish(); activity.finish() }
         } finally {
             shell(if (originalServices.isEmpty()) "settings delete secure enabled_accessibility_services" else "settings put secure enabled_accessibility_services $originalServices")
             if (originalServices.isEmpty()) shell("settings put secure accessibility_enabled 0")

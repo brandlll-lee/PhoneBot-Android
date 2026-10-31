@@ -19,7 +19,7 @@ import kotlin.coroutines.coroutineContext
 internal class PhoneActions(private val service: PhoneAccessibilityService, private val screen: ScreenState) {
     private val actions = setOf("app_launch", "app_send_intent", "phone_open_link", "tap", "swipe", "input_text", "back", "home")
 
-    private suspend fun settle(expected: JSONObject? = null, timeout: Long = 2500, packageName: String? = null, dialogWindow: Int? = null): JSONObject {
+    private suspend fun settle(expected: JSONObject?, timeout: Long, packageName: String?, dialogWindow: Int?, before: String, conditionBefore: Boolean): JSONObject {
         val began = SystemClock.uptimeMillis()
         var previous = ""
         var repeats = 0
@@ -31,20 +31,22 @@ internal class PhoneActions(private val service: PhoneAccessibilityService, priv
             repeats = if (fingerprint.isNotEmpty() && fingerprint == previous) repeats + 1 else 0
             val stable = repeats >= 2 && SystemClock.uptimeMillis() - service.lastScreenEvent >= 250
             val met = fingerprint.isNotEmpty() && expected?.let(screen::condition) == true
+            val changed = fingerprint.isNotEmpty() && fingerprint != before
             val expired = SystemClock.uptimeMillis() - began >= timeout
             val popup = dialog() && screen.root?.windowId != dialogWindow
             val switched = fingerprint.isNotEmpty() && packageName != null && screen.latest.optString("package") != packageName &&
                 expected?.optString("package") != screen.latest.optString("package")
             val reason = when {
                 popup -> "dialog"
-                met -> "condition_met"
                 switched -> "navigation"
+                met && stable -> if (conditionBefore && !changed) "condition_unchanged" else "condition_met"
                 expected == null && stable -> "tree_stable"
                 expired -> if (fingerprint.isEmpty()) "tree_unreadable" else "timeout"
                 else -> null
             }
             if (reason != null) return JSONObject()
                 .put("treeStable", stable).put("conditionMet", if (expected == null) JSONObject.NULL else met)
+                .put("conditionBefore", if (expected == null) JSONObject.NULL else conditionBefore).put("changed", changed)
                 .put("waitMs", SystemClock.uptimeMillis() - began)
                 .put("stopReason", reason)
             previous = fingerprint
@@ -98,12 +100,12 @@ internal class PhoneActions(private val service: PhoneAccessibilityService, priv
         val dialogWindow = screen.root?.windowId?.takeIf { dialog() }
         val before = screen.latest.optString("package").takeUnless { it == "null" || it.isEmpty() }
         val fingerprint = screen.fingerprint()
+        val conditionBefore = target?.let(screen::condition) == true
         act(name, params)
-        val result = settle(target, timeout, before.takeIf { name !in setOf("app_launch", "home", "back") }, dialogWindow).put("inputVerified", name == "input_text")
+        val result = settle(target, timeout, before.takeIf { name !in setOf("app_launch", "home", "back") }, dialogWindow, fingerprint, conditionBefore).put("inputVerified", name == "input_text")
         val reason = result.getString("stopReason")
         val changedApp = before != null && screen.latest.optString("package") != before
-        screen.latest.put("changed", fingerprint != screen.fingerprint())
-        return result.put("executed", true).put("ok", target == null || result.optBoolean("conditionMet"))
+        return result.put("executed", true).put("ok", true)
             .put("navigation", if (!changedApp) "none" else if (reason == "navigation") "unplanned" else "expected")
             .put("canContinue", reason == "condition_met" || reason == "tree_stable" && name in setOf("input_text", "home", "back"))
     }
