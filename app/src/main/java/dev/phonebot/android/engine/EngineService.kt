@@ -199,7 +199,7 @@ class EngineService : Service() {
         if (cancelled) { write(JSONObject().put("type", "tool_result").put("id", id).put("error", "任务已停止")); return }
         val params = event.optJSONObject("params") ?: JSONObject()
         if (name == "auth_prompt") { authPrompt = id; promptEvent = event.put("type", "auth_prompt"); emit(event); return }
-        val internal = name.startsWith("vault_") || name == "runtime_info"
+        val internal = name.startsWith("vault_") || name in setOf("runtime_info", "image_prepare")
         val phone = PhoneAccessibilityService.instance
         if (!internal && (phone == null || !phone.available())) {
             pausedTool = event
@@ -213,6 +213,11 @@ class EngineService : Service() {
                 val result: Any? = withTimeout(if (name == "do_steps") 90000 else 30000) {
                     when (name) {
                         "runtime_info" -> JSONObject().put("platform", "android").put("sdk", Build.VERSION.SDK_INT).put("pid", Process.myPid()).put("manufacturer", Build.MANUFACTURER)
+                        "image_prepare" -> withContext(Dispatchers.IO) {
+                            val session = params.getString("session")
+                            require(session.matches(Regex("[a-zA-Z0-9-]{1,80}"))) { "图片会话无效" }
+                            ModelImages.prepare(File(filesDir, "images/$session"), params.getString("reference"))
+                        }
                         "vault_read" -> withContext(Dispatchers.IO) { vault.read(params.getString("provider")).also { journal.remember(it) } }
                         "vault_list" -> withContext(Dispatchers.IO) { vault.list() }
                         "vault_write" -> withContext(Dispatchers.IO) { journal.remember(params.getJSONObject("credential")); vault.write(params.getString("provider"), params.getJSONObject("credential")); true }
@@ -238,6 +243,7 @@ class EngineService : Service() {
         val safe = if (persist && taskStart != null && event.optString("taskId") == taskStart?.optString("taskId")) journal.append(event) else journal.clean(event)
         if (event.optString("type") == "auth_event") loginEvent = event
         if (taskStart != null && event.optString("taskId") == taskStart?.optString("taskId") && event.optString("type") in setOf("result", "error", "cancelled", "interrupted")) taskEnded = true
+        taskStart?.takeIf { it.optString("taskId") == event.optString("taskId") }?.let { TaskNotifications.post(this, journal, it, safe) }
         sendToClients { eventMessage(safe) }
     }
 

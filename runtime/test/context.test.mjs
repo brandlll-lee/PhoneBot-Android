@@ -32,6 +32,7 @@ test("compaction preserves user goal, tool pairs and a full baseline for retaine
   const context = contextManager({ contextWindow: 12000, maxTokens: 1000 });
   const history = [user("找到中文设置")];
   for (let i = 0; i < 16; i++) history.push(call(`t${i}`), result(`t${i}`, { kind: i === 0 ? "full" : "diff", snapshot: i + 1, baseSnapshot: i, elements: [{ id: "e1", text: "初始" }], updated: [{ id: "e1", text: `页面${i}` }], text: "中文页面内容".repeat(240) }));
+  for (const message of history.filter((m) => m.role === "toolResult")) message.content.push({ type: "text", text: `Archived screen image: ${"a".repeat(64)}. Use image_recall to inspect it.` });
   const sent = context.project(history).messages;
   assert.ok(sent.length < history.length);
   assert.equal(sent[0].content, "找到中文设置");
@@ -68,4 +69,14 @@ test("an interrupted tool batch gets explicit failed results before the next use
   assert.equal(repaired[3].isError, true);
   assert.equal(repaired[4].role, "user");
   assert.equal(history.length, 4);
+});
+
+test("compaction retains image recall references", () => {
+  const reference = "a".repeat(64);
+  const history = [user("继续分析刚才的图片")];
+  for (let i = 0; i < 12; i++) history.push(call(`t${i}`), result(`t${i}`, { text: "中文内容".repeat(300) }));
+  history[2].content.push({ type: "text", text: `Archived screen image: ${reference}. Use image_recall to inspect it.` });
+  const sent = contextManager({ contextWindow: 6000, maxTokens: 1000 }).project(history).messages;
+  assert.ok(sent.length < history.length);
+  assert.ok(JSON.stringify(sent).includes(reference));
 });

@@ -19,16 +19,23 @@ import kotlin.coroutines.coroutineContext
 internal class PhoneActions(private val service: PhoneAccessibilityService, private val screen: ScreenState) {
     private val actions = setOf("app_launch", "tap", "swipe", "input_text", "back", "home")
 
-    private suspend fun settle(): Boolean {
-        val deadline = SystemClock.uptimeMillis() + 2500
+    private suspend fun settle(expected: JSONObject? = null, timeout: Long = 2500, packageName: String? = null, dialogWindow: Int? = null): JSONObject {
+        val began = SystemClock.uptimeMillis()
         var previous = ""
         var repeats = 0
         while (true) {
             coroutineContext.ensureActive()
+            check(service.available()) { "请亮屏并解锁手机" }
             val fingerprint = runCatching { screen.scan(); screen.fingerprint() }.getOrDefault("")
             repeats = if (fingerprint.isNotEmpty() && fingerprint == previous) repeats + 1 else 0
-            if (repeats >= 2 && SystemClock.uptimeMillis() - service.lastScreenEvent >= 250) return true
-            if (SystemClock.uptimeMillis() >= deadline) return false
+            val stable = repeats >= 2 && SystemClock.uptimeMillis() - service.lastScreenEvent >= 250
+            val met = fingerprint.isNotEmpty() && expected?.let(screen::condition) == true
+            val expired = SystemClock.uptimeMillis() - began >= timeout
+            val interrupted = fingerprint.isNotEmpty() && ((dialog() && service.rootInActiveWindow?.windowId != dialogWindow) || (packageName != null && screen.latest.optString("package") != packageName))
+            if ((stable && (expected == null || met)) || expired || interrupted) return JSONObject()
+                .put("treeStable", stable).put("conditionMet", if (expected == null) JSONObject.NULL else met)
+                .put("waitMs", SystemClock.uptimeMillis() - began)
+                .put("stopReason", if (expired) "timeout" else if (expected == null) "tree_stable" else "condition_met")
             previous = fingerprint
             delay(120)
         }
@@ -36,40 +43,31 @@ internal class PhoneActions(private val service: PhoneAccessibilityService, priv
 
     suspend fun execute(name: String, params: JSONObject, report: (JSONObject) -> Unit): JSONObject {
         if (name != "do_steps") {
-            val stable = act(name, params)
-            return screen.present(false).put("stable", stable).put("inputVerified", name == "input_text")
+            val result = step(name, params, params.optJSONObject("expect"))
+            val view = screen.present(false)
+            result.keys().forEach { view.put(it, result.get(it)) }
+            return view
         }
         val steps = params.getJSONArray("steps")
         require(steps.length() in 1..12) { "连续操作需要 1 到 12 步" }
         for (i in 0 until steps.length()) {
             val step = steps.getJSONObject(i)
             require(step.getString("tool") in actions) { "连续操作包含未知工具" }
-            val args = step.getJSONObject("args")
-            require(!args.has("element") && !args.has("x") && !args.has("y")) { "连续操作请使用文字或资源 ID 定位目标" }
         }
         val results = JSONArray()
         var stopped = false
         for (i in 0 until steps.length()) {
             coroutineContext.ensureActive()
-            val step = steps.getJSONObject(i)
-            val tool = step.getString("tool")
-            val args = step.getJSONObject("args")
+            val spec = steps.getJSONObject(i)
+            val tool = spec.getString("tool")
+            val args = spec.getJSONObject("args")
             val started = SystemClock.elapsedRealtime()
             report(JSONObject().put("type", "step").put("id", "batch-$i").put("name", tool).put("args", args))
             val result = JSONObject().put("index", i).put("tool", tool)
             try {
-                check(settle()) { "页面尚未稳定，请重新判断" }
-                check(!dialog()) { "出现弹窗，请重新判断" }
-                val before = screen.latest.optString("package")
-                val stable = act(tool, args)
-                check(stable) { "页面尚未稳定，请重新判断" }
-                if (tool !in setOf("app_launch", "home", "back")) check(screen.latest.optString("package") == before) { "应用发生切换，请重新判断" }
-                check(!dialog()) { "出现弹窗，请重新判断" }
-                step.optJSONObject("expect")?.let { expected ->
-                    if (expected.has("package")) check(screen.latest.optString("package") == expected.getString("package")) { "未进入预期应用" }
-                    if (expected.has("text")) check(screen.text().contains(expected.getString("text"))) { "未出现预期文字" }
-                }
-                result.put("ok", true)
+                val outcome = step(tool, args, args.optJSONObject("expect"))
+                outcome.keys().forEach { result.put(it, outcome.get(it)) }
+                stopped = !outcome.getBoolean("ok")
             } catch (error: CancellationException) { throw error }
             catch (error: Exception) { result.put("ok", false).put("error", error.message); stopped = true }
             result.put("durationMs", SystemClock.elapsedRealtime() - started)
@@ -80,17 +78,35 @@ internal class PhoneActions(private val service: PhoneAccessibilityService, priv
         return JSONObject().put("ok", !stopped).put("steps", results).put("remaining", steps.length() - results.length()).put("screen", screen.present(false))
     }
 
+    private suspend fun step(name: String, params: JSONObject, expected: JSONObject?): JSONObject {
+        val timeout = params.optLong("timeoutMs", if (expected == null) 2500 else 8000)
+        require(timeout in 250..15000) { "等待上限需为 250 到 15000 毫秒" }
+        screen.scan()
+        val dialogWindow = service.rootInActiveWindow?.windowId?.takeIf { dialog() }
+        val before = screen.latest.optString("package")
+        val fingerprint = screen.fingerprint()
+        act(name, params)
+        val result = settle(expected, timeout, before.takeIf { name !in setOf("app_launch", "home", "back") }, dialogWindow).put("inputVerified", name == "input_text")
+        val switched = name !in setOf("app_launch", "home", "back") && screen.latest.optString("package") != before
+        val reason = when {
+            dialog() && service.rootInActiveWindow?.windowId != dialogWindow -> "dialog"
+            switched -> "app_changed"
+            result.getString("stopReason") == "timeout" -> "timeout"
+            else -> result.getString("stopReason")
+        }
+        screen.latest.put("changed", fingerprint != screen.fingerprint())
+        return result.put("stopReason", reason).put("ok", reason in setOf("tree_stable", "condition_met"))
+    }
+
     private fun dialog(): Boolean {
         val root = service.rootInActiveWindow ?: return true
         return root.className?.contains("Dialog", true) == true || root.findAccessibilityNodeInfosByViewId("android:id/alertTitle").isNotEmpty()
     }
 
-    private suspend fun act(name: String, params: JSONObject): Boolean {
+    private suspend fun act(name: String, params: JSONObject) {
         coroutineContext.ensureActive()
         check(service.available()) { "请亮屏并解锁手机" }
         require(name in actions) { "工具不存在" }
-        screen.scan()
-        val before = screen.fingerprint()
         when (name) {
             "app_launch" -> {
                 val target = params.getString("package")
@@ -149,8 +165,5 @@ internal class PhoneActions(private val service: PhoneAccessibilityService, priv
             "back" -> check(service.performGlobalAction(AccessibilityService.GLOBAL_ACTION_BACK)) { "系统拒绝返回操作" }
             "home" -> check(service.performGlobalAction(AccessibilityService.GLOBAL_ACTION_HOME)) { "系统拒绝主页操作" }
         }
-        val stable = settle()
-        screen.latest.put("changed", before != screen.fingerprint())
-        return stable
     }
 }

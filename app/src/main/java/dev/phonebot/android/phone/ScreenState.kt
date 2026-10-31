@@ -114,6 +114,22 @@ internal class ScreenState(private val service: AccessibilityService) {
     }
 
     fun text(): Set<String> = entries.filterNot { it.node.isPassword }.mapNotNull { it.node.text?.toString() }.toSet()
+    fun condition(expected: JSONObject): Boolean {
+        if (expected.has("package") && latest.optString("package") != expected.getString("package")) return false
+        val selectors = listOf("element", "text", "resourceId", "editable", "enabled", "withinResourceId")
+        if (selectors.none(expected::has)) return !expected.optBoolean("absent")
+        val found = entries.any { entry ->
+            val node = entry.node
+            !node.isPassword && node.isVisibleToUser &&
+                (!expected.has("element") || entry.id == expected.getString("element")) &&
+                (!expected.has("text") || (node.text?.toString() == expected.getString("text") || node.contentDescription?.toString() == expected.getString("text")) && node.isEditable == expected.optBoolean("editable")) &&
+                (!expected.has("resourceId") || node.viewIdResourceName == expected.getString("resourceId")) &&
+                (!expected.has("editable") || node.isEditable == expected.getBoolean("editable")) &&
+                (!expected.has("enabled") || node.isEnabled == expected.getBoolean("enabled")) &&
+                (!expected.has("withinResourceId") || entry.key.contains("/${expected.getString("withinResourceId")}:"))
+        }
+        return found != expected.optBoolean("absent")
+    }
     fun editable(): AccessibilityNodeInfo? = entries.map { it.node }.singleOrNull { it.isEditable && it.isFocused && !it.isPassword }
 
     fun fingerprint(): String = latest.optString("page") + entries.joinToString { it.value.toString() }

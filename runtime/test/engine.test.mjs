@@ -7,11 +7,13 @@ import { once } from "node:events";
 function engine(t, entry = "src/main.mjs") {
   const child = spawn(process.execPath, [entry], { stdio: ["pipe", "pipe", "pipe"] });
   const events = [];
+  const seen = [];
   const readers = [];
   let stderr = "";
   child.stderr.on("data", (data) => { stderr += data; });
   createInterface({ input: child.stdout }).on("line", (line) => {
-    events.push(JSON.parse(line));
+    const event = JSON.parse(line);
+    events.push(event); seen.push(event);
     readers.splice(0).forEach((notify) => notify());
   });
   const exited = once(child, "exit");
@@ -31,6 +33,7 @@ function engine(t, entry = "src/main.mjs") {
       return events.splice(events.findIndex((event) => event.type === type), 1)[0];
     },
     exited,
+    seen,
   };
 }
 
@@ -47,6 +50,8 @@ for (const entry of ["src/main.mjs", "dist/engine.mjs"]) {
       assert.equal(result.evidence.requests, 2);
       assert.equal(JSON.parse(result.evidence.toolResult).pid, 42);
       assert.match(result.text, /中文/);
+      await host.next("idle");
+      assert.equal(host.seen.filter((event) => event.taskId === result.taskId && ["result", "error", "cancelled"].includes(event.type)).length, 1);
     }
     host.send({ type: "stop" });
     await host.next("stopped");

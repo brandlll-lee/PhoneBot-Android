@@ -6,6 +6,7 @@ import android.os.Bundle
 import android.graphics.BitmapFactory
 import androidx.compose.foundation.Image
 import androidx.activity.ComponentActivity
+import androidx.activity.viewModels
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.SystemBarStyle
@@ -54,7 +55,6 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import androidx.lifecycle.viewmodel.compose.viewModel
 import dev.phonebot.android.engine.EnginePhase
 import dev.phonebot.android.phone.PhonePermissions
 import kotlinx.coroutines.launch
@@ -63,10 +63,22 @@ import java.time.LocalDate
 import java.time.ZoneId
 
 class MainActivity : ComponentActivity() {
+    private val model: PhoneBotModel by viewModels()
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge(statusBarStyle = SystemBarStyle.dark(android.graphics.Color.TRANSPARENT), navigationBarStyle = SystemBarStyle.dark(android.graphics.Color.TRANSPARENT))
-        setContent { PhoneBotTheme { PhoneBotApp(viewModel()) } }
+        openTask(intent)
+        setContent { PhoneBotTheme { PhoneBotApp(model) } }
+    }
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        openTask(intent)
+    }
+    private fun openTask(intent: Intent) {
+        val session = intent.getStringExtra("session") ?: return
+        val task = intent.getStringExtra("task") ?: return
+        model.openTask(session, task)
     }
 }
 
@@ -90,6 +102,9 @@ private val Accent = Color(0xFF88ABFF)
     val snackbar = remember { SnackbarHostState() }
     var panel by rememberSaveable { mutableStateOf("") }
     var query by rememberSaveable { mutableStateOf("") }
+    LaunchedEffect(model.focusedTask) {
+        if (model.focusedTask.isNotEmpty()) { panel = ""; drawer.close() }
+    }
     val context = LocalContext.current
     val lifecycle = LocalLifecycleOwner.current.lifecycle
     DisposableEffect(lifecycle) {
@@ -146,8 +161,12 @@ private val Accent = Color(0xFF88ABFF)
                 }
                 val turns = model.session?.turns.orEmpty()
                 val list = rememberLazyListState()
+                LaunchedEffect(model.focusedTask, model.selectedSession, turns.size) {
+                    val index = turns.indexOfFirst { it.id == model.focusedTask }
+                    if (index >= 0) list.scrollToItem(index)
+                }
                 LaunchedEffect(turns.size, turns.lastOrNull()?.answer?.length, turns.lastOrNull()?.steps?.size) {
-                    if (turns.isNotEmpty() && !list.isScrollInProgress) {
+                    if (turns.isNotEmpty() && model.focusedTask.isEmpty() && !list.isScrollInProgress) {
                         if (list.layoutInfo.visibleItemsInfo.none { it.index == turns.lastIndex }) list.animateScrollToItem(turns.lastIndex)
                         val last = list.layoutInfo.visibleItemsInfo.lastOrNull()
                         val overflow = (last?.let { it.offset + it.size } ?: 0) - list.layoutInfo.viewportEndOffset
@@ -217,7 +236,7 @@ private val Accent = Color(0xFF88ABFF)
                     panel == "permissions" -> Column(Modifier.verticalScroll(rememberScrollState()).padding(18.dp), verticalArrangement = Arrangement.spacedBy(24.dp)) {
                         model.permissions.forEach { permission ->
                             SettingsGroup {
-                                SettingsRow(if (permission.id == "notifications") Icons.Outlined.Notifications else Icons.Outlined.Lock, permission.name, if (permission.granted) "已开启" else "待授权") {
+                                SettingsRow(if (permission.id in setOf("notifications", "task_results")) Icons.Outlined.Notifications else Icons.Outlined.Lock, permission.name, if (permission.granted) "已开启" else "待授权") {
                                     if (permission.id == "notifications" && PhonePermissions.notificationPermission() != null && !permission.granted)
                                         (context as? ComponentActivity)?.requestPermissions(arrayOf(PhonePermissions.notificationPermission()!!), 1)
                                     else context.startActivity(PhonePermissions.settings(context, permission.id))
@@ -306,7 +325,7 @@ private val Accent = Color(0xFF88ABFF)
                 }
             }
         }
-        if (turn.answer.isNotBlank()) SelectionContainer { Text(turn.answer, fontSize = 17.sp, lineHeight = 28.sp, color = if (turn.status == "error") MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface) }
+        if (turn.answer.isNotBlank()) MarkdownAnswer.Content(turn.answer, running)
         if (turn.image.isNotEmpty()) {
             val bitmap by produceState<android.graphics.Bitmap?>(null, turn.image) {
                 value = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { BitmapFactory.decodeFile(turn.image, BitmapFactory.Options().apply { inSampleSize = 3 }) }

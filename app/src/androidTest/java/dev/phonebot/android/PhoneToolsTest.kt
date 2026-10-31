@@ -68,9 +68,12 @@ class PhoneToolsTest {
         val originalServices = shell("settings get secure enabled_accessibility_services").trim().takeUnless { it == "null" }.orEmpty()
         val component = "${context.packageName}/.phone.PhoneAccessibilityService"
         try {
-            shell("settings put secure enabled_accessibility_services ${if (originalServices.isEmpty()) component else "$originalServices:$component"}")
-            shell("settings put secure accessibility_enabled 1")
+            instrumentation.startActivitySync(Intent(context, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
             val activity = instrumentation.startActivitySync(Intent().setComponent(ComponentName(context.packageName, "dev.phonebot.android.testing.PhoneTestActivity")).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+            val others = originalServices.split(':').filter { it.isNotEmpty() && ComponentName.unflattenFromString(it) != ComponentName.unflattenFromString(component) }.joinToString(":")
+            shell(if (others.isEmpty()) "settings delete secure enabled_accessibility_services" else "settings put secure enabled_accessibility_services $others")
+            shell("settings put secure enabled_accessibility_services ${if (others.isEmpty()) component else "$others:$component"}")
+            shell("settings put secure accessibility_enabled 1")
             SystemClock.sleep(2000)
             var screen = call("screen_read")
             val input = checkNotNull(screen.getJSONArray("elements").objects().firstOrNull { it.optBoolean("editable") }) { "输入框缺失：$screen" }.getString("id")
@@ -82,6 +85,8 @@ class PhoneToolsTest {
             screen = call("tap", JSONObject().put("text", "确认点击"))
             screen = call("screen_read")
             assertTrue(screen.getJSONArray("elements").objects().any { it.optString("text") == "点击成功" })
+            instrumentation.runOnMainSync { activity.getSystemService(android.view.inputmethod.InputMethodManager::class.java).hideSoftInputFromWindow(activity.window.decorView.windowToken, 0) }
+            SystemClock.sleep(400)
             val image = call("screen_read", JSONObject().put("ocr", true).put("image", true))
             assertTrue(File(image.getString("image")).length() > 1000)
             val info = image.getJSONObject("imageInfo")
@@ -92,13 +97,23 @@ class PhoneToolsTest {
             assertEquals(image.getInt("width").toDouble(), bitmap.width * info.getDouble("screenPerImageX"), 0.01)
             bitmap.recycle()
             val ocr = image.getJSONArray("ocr").objects().joinToString { it.getString("text") }
-            assertTrue(ocr, ocr.contains("OCR") && (ocr.contains("识别") || ocr.contains("屏幕")))
+            assertTrue(ocr, ocr.contains("English 123") && (ocr.contains("识别") || ocr.contains("屏幕")))
             assertTrue(call("app_list").getJSONArray("apps").objects().any { it.getString("package") == context.packageName })
             call("tap", JSONObject().put("x", -1).put("y", 1), false)
             call("tap", JSONObject().put("text", "重复目标"), false)
-            val batch = call("do_steps", JSONObject("""{"steps":[{"tool":"input_text","args":{"resourceId":"android:id/edit","text":"连续中文"},"expect":{"text":"连续中文"}},{"tool":"tap","args":{"text":"确认点击"},"expect":{"text":"点击成功"}}]}"""))
+            val batch = call("do_steps", JSONObject("""{"steps":[{"tool":"input_text","args":{"element":"$input","text":"连续中文","expect":{"text":"连续中文","editable":true}}},{"tool":"tap","args":{"text":"确认点击","expect":{"text":"点击成功"}}}]}"""))
             assertTrue(batch.toString(), batch.getBoolean("ok"))
             assertEquals(2, batch.getJSONArray("steps").length())
+            val delayed = call("tap", JSONObject("""{"text":"延迟加载","expect":{"resourceId":"android:id/text1","text":"异步结果","withinResourceId":"android:id/list"}}"""))
+            assertTrue(delayed.toString(), delayed.getBoolean("conditionMet"))
+            assertTrue(delayed.getLong("waitMs") >= 900)
+            val quiet = call("input_text", JSONObject("""{"resourceId":"android:id/edit","text":"仅输入"}"""))
+            assertTrue(quiet.getBoolean("treeStable"))
+            assertTrue(quiet.isNull("conditionMet"))
+            val unmet = call("do_steps", JSONObject("""{"steps":[{"tool":"input_text","args":{"resourceId":"android:id/edit","text":"输入并非结果","expect":{"text":"输入并非结果"},"timeoutMs":500}},{"tool":"home","args":{}}]}"""))
+            assertFalse(unmet.getBoolean("ok"))
+            assertEquals("timeout", unmet.getJSONArray("steps").getJSONObject(0).getString("stopReason"))
+            assertEquals(1, unmet.getInt("remaining"))
             val stopped = call("do_steps", JSONObject("""{"steps":[{"tool":"tap","args":{"text":"不存在的按钮"}},{"tool":"input_text","args":{"resourceId":"android:id/edit","text":"不应执行"}}]}"""))
             assertFalse(stopped.getBoolean("ok"))
             assertEquals(1, stopped.getInt("remaining"))
@@ -106,6 +121,8 @@ class PhoneToolsTest {
             val dialog = call("do_steps", JSONObject("""{"steps":[{"tool":"tap","args":{"text":"显示弹窗"}},{"tool":"home","args":{}}]}"""))
             assertFalse(dialog.getBoolean("ok"))
             assertEquals(1, dialog.getInt("remaining"))
+            assertTrue(call("tap", JSONObject().put("text", "关闭")).getBoolean("ok"))
+            assertEquals("dialog", call("tap", JSONObject().put("text", "显示弹窗")).getString("stopReason"))
             call("back")
             instrumentation.runOnMainSync { activity.getSystemService(android.view.inputmethod.InputMethodManager::class.java).hideSoftInputFromWindow(activity.window.decorView.windowToken, 0) }
             SystemClock.sleep(400)
@@ -119,7 +136,7 @@ class PhoneToolsTest {
             assertEquals(context.packageName, call("app_launch", JSONObject().put("package", context.packageName)).getString("package"))
             instrumentation.runOnMainSync { activity.finish() }
         } finally {
-            shell("settings put secure enabled_accessibility_services '$originalServices'")
+            shell(if (originalServices.isEmpty()) "settings delete secure enabled_accessibility_services" else "settings put secure enabled_accessibility_services $originalServices")
             if (originalServices.isEmpty()) shell("settings put secure accessibility_enabled 0")
         }
     }

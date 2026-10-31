@@ -39,7 +39,7 @@ test("Pi validates phone arguments before dispatch", async (t) => {
 });
 
 test("Pi dispatches two locally checked actions in one tool round trip", async (t) => {
-  const steps = [{ tool: "tap", args: { text: "设置" }, expect: { text: "语言" } }, { tool: "tap", args: { text: "语言" } }];
+  const steps = [{ tool: "tap", args: { text: "设置", expect: { text: "语言" } } }, { tool: "tap", args: { text: "语言" } }];
   const fixture = await startFixture({ tool: "do_steps", params: { steps } });
   t.after(fixture.close);
   const model = { id: "phone", name: "phone", provider: "fixture", api: "openai-completions", baseUrl: fixture.baseUrl,

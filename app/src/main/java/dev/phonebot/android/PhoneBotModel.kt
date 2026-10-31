@@ -51,6 +51,8 @@ class PhoneBotModel(application: Application) : AndroidViewModel(application) {
     private val journalDirectory = File(application.filesDir, "task-events")
     var sessions by mutableStateOf(listOf<ChatSession>()); private set
     var selectedSession by mutableStateOf(""); private set
+    var focusedTask by mutableStateOf(""); private set
+    private var requestedSession = ""
     var provider by mutableStateOf(preferences.getString("provider", "").orEmpty()); private set
     var model by mutableStateOf(preferences.getString("model", "").orEmpty()); private set
     var providers by mutableStateOf(listOf<PiProvider>()); private set
@@ -96,6 +98,7 @@ class PhoneBotModel(application: Application) : AndroidViewModel(application) {
                 }
                 sessions = loaded
                 selectedSession = loaded.firstOrNull()?.id.orEmpty()
+                if (requestedSession.isNotEmpty()) openTask(requestedSession, focusedTask)
             } catch (_: Exception) { notice = "会话记录读取失败" }
             if (sessions.isEmpty()) newSession()
             engine.start()
@@ -114,12 +117,18 @@ class PhoneBotModel(application: Application) : AndroidViewModel(application) {
     fun refreshPermissions() { permissions = PhonePermissions.check(getApplication()) }
     fun newSession() {
         if (activeTask.isNotEmpty()) return
+        focusedTask = ""; requestedSession = ""
         val next = ChatSession()
         sessions = listOf(next) + sessions.filter { it.turns.isNotEmpty() }
         selectedSession = next.id
         save()
     }
-    fun selectSession(id: String) { if (activeTask.isEmpty()) selectedSession = id }
+    fun selectSession(id: String) { if (activeTask.isEmpty()) { selectedSession = id; focusedTask = ""; requestedSession = "" } }
+    fun openTask(session: String, task: String) {
+        requestedSession = session
+        focusedTask = task
+        if (sessions.any { it.id == session && it.turns.any { turn -> turn.id == task } }) selectedSession = session
+    }
     fun deleteSession(id: String) {
         if (activeTask.isNotEmpty()) return
         sessions = sessions.filter { it.id != id }
@@ -127,6 +136,7 @@ class PhoneBotModel(application: Application) : AndroidViewModel(application) {
         if (sessions.isEmpty()) newSession() else save()
         viewModelScope.launch(Dispatchers.IO) {
             File(getApplication<Application>().filesDir, "transcripts/$id.json").delete()
+            File(getApplication<Application>().filesDir, "images/$id").deleteRecursively()
             val journal = TaskJournal(journalDirectory)
             journalDirectory.listFiles()?.filter { file -> journal.records(file).firstOrNull()?.optString("session") == id }?.forEach { it.delete() }
         }
@@ -159,6 +169,7 @@ class PhoneBotModel(application: Application) : AndroidViewModel(application) {
         if (provider.isEmpty() || model.isEmpty()) { notice = "请先选择服务商和模型"; return false }
         if (!engine.state.value.canRun) { notice = "请等待引擎就绪"; return false }
         if (session == null) newSession()
+        focusedTask = ""; requestedSession = ""
         activeTask = UUID.randomUUID().toString()
         sessions = sessions.map { if (it.id == selectedSession) it.copy(title = if (it.turns.isEmpty()) prompt.take(30) else it.title,
             updated = System.currentTimeMillis(), turns = it.turns + ChatTurn(activeTask, prompt)) else it }.sortedByDescending { it.updated }
@@ -181,9 +192,10 @@ class PhoneBotModel(application: Application) : AndroidViewModel(application) {
         when (event.getString("type")) {
             "task_open" -> {
                 activeTask = event.getString("taskId")
-                selectedSession = event.getString("session")
-                if (sessions.none { it.id == selectedSession }) sessions = listOf(ChatSession(id = selectedSession, title = event.getString("prompt").take(30))) + sessions
-                sessions = sessions.map { session -> if (session.id == selectedSession) session.copy(turns = session.turns.filter { it.id != activeTask } + ChatTurn(activeTask, event.getString("prompt"))) else session }
+                val owner = event.getString("session")
+                if (requestedSession.isEmpty()) selectedSession = owner
+                if (sessions.none { it.id == owner }) sessions = listOf(ChatSession(id = owner, title = event.getString("prompt").take(30))) + sessions
+                sessions = sessions.map { session -> if (session.id == owner) session.copy(turns = session.turns.filter { it.id != activeTask } + ChatTurn(activeTask, event.getString("prompt"))) else session }
             }
             "catalog" -> {
                 providers = event.getJSONArray("providers").objects().map { value -> PiProvider(value.getString("id"), value.getString("name"), value.getInt("count"), value.getBoolean("configured"),

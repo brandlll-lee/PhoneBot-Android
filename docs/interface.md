@@ -8,6 +8,8 @@ The chat is the first screen. Use a near-black background, white body text, gray
 
 Align user messages to the right. Put assistant text directly on the page. Show tool execution in an expandable timeline. Show tool details only after a tap. Keep the composer above the keyboard and system navigation area. Replace Send with Stop during a task. Give each icon an accessible name and a 48 dp touch target.
 
+Render assistant replies with the same native Markdown component during streaming, after completion, and after history restore. Keep the source Markdown in storage. Parse streaming tails off the UI thread. Keep rendered text visible during final parsing. Support headings, emphasis, lists, quotes, links, tables, and selectable text. Code blocks use syntax highlighting, Copy, and horizontal scrolling. Use the chat's dark palette and system text scaling.
+
 Use the empty state to show the product name and model selection. Use short state messages for loading, failure, permission pauses, and interruption. Show actual task events. Keep model reasoning private.
 
 ## Drawer
@@ -19,6 +21,12 @@ Use a search field, date groups, conversation rows, and a settings footer. Highl
 Use one tall sheet with a centered title, back navigation, and Close. Group related rows. Put the icon on the left and the current value on the right. Use inset dividers. Put provider authentication and model selection inside this sheet. Keep credentials out of the conversation.
 
 Only add a secondary label when it adds useful context. Permission purposes and Android connection status provide required information. Establish other hierarchy with font size, weight, spacing, and alignment.
+
+## Task notifications
+
+Post one result notification for each user task in both foreground and background. Show execution ended, failed, or stopped, with the task title and a plain-text result preview. Keep the high-importance result channel separate from the quiet engine channel. Notification taps close the drawer or settings, open the recorded session, and scroll to its task. Handle both a new activity and an existing activity. Journal replay and connection checks do not post result notifications.
+
+The permission page shows notification permission and the result channel's banner state. Open the channel's system settings from its row. Permission denial leaves task execution available. Android and the user's channel and Do Not Disturb settings control actual banner delivery.
 
 ## Acceptance
 

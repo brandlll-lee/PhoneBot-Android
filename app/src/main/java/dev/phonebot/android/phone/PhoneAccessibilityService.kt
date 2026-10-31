@@ -12,7 +12,6 @@ import android.os.PowerManager
 import android.os.SystemClock
 import android.view.Display
 import android.view.accessibility.AccessibilityEvent
-import androidx.core.graphics.scale
 import com.google.mlkit.common.MlKit
 import com.google.mlkit.vision.common.InputImage
 import com.google.mlkit.vision.text.TextRecognition
@@ -118,17 +117,13 @@ class PhoneAccessibilityService : AccessibilityService() {
             }
             if (image) {
                 coroutineContext.ensureActive()
-                val factor = minOf(1.0, 1280.0 / maxOf(bitmap.width, bitmap.height))
-                val resized = if (factor < 1) bitmap.scale(maxOf(1, (bitmap.width * factor).toInt()), maxOf(1, (bitmap.height * factor).toInt())) else bitmap
-                try {
-                    val directory = File(cacheDir, "screens").apply { mkdirs() }
-                    directory.listFiles()?.sortedByDescending { it.lastModified() }?.drop(19)?.forEach { it.delete() }
-                    val file = File(directory, "${System.nanoTime()}.jpg")
-                    file.outputStream().use { check(resized.compress(Bitmap.CompressFormat.JPEG, 80, it)) }
-                    result.put("image", file.path).put("imageInfo", JSONObject().put("mimeType", "image/jpeg")
-                        .put("width", resized.width).put("height", resized.height).put("sourceWidth", bitmap.width).put("sourceHeight", bitmap.height)
-                        .put("screenPerImageX", geometry.width.toDouble() / resized.width).put("screenPerImageY", geometry.height.toDouble() / resized.height))
-                } finally { if (resized !== bitmap) resized.recycle() }
+                val directory = File(cacheDir, "screens").apply { mkdirs() }
+                directory.listFiles()?.sortedByDescending { it.lastModified() }?.drop(19)?.forEach { it.delete() }
+                val file = File(directory, "${System.nanoTime()}.jpg")
+                val encoded = dev.phonebot.android.engine.ModelImages.encode(bitmap, file)
+                result.put("image", file.path).put("imageInfo", JSONObject().put("mimeType", "image/jpeg")
+                    .put("width", encoded.getInt("width")).put("height", encoded.getInt("height")).put("sourceWidth", bitmap.width).put("sourceHeight", bitmap.height)
+                    .put("screenPerImageX", geometry.width.toDouble() / encoded.getInt("width")).put("screenPerImageY", geometry.height.toDouble() / encoded.getInt("height")))
             }
         } finally { bitmap.recycle() }
         return result

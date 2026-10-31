@@ -1,9 +1,10 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, writeFile, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, writeFile, rm } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { join } from "node:path";
 import { phoneTools } from "../src/tools.mjs";
+import { imageStore } from "../src/images.mjs";
 
 test("screenshots become Pi image content only for a vision model", async (t) => {
   const temporary = fileURLToPath(new URL("../../.tools/tests/", import.meta.url));
@@ -24,4 +25,36 @@ test("screenshots become Pi image content only for a vision model", async (t) =>
   assert.equal(result.details.image, undefined);
   const textTool = phoneTools(host, { input: ["text"] }).find((item) => item.name === "screenshot");
   await assert.rejects(textTool.execute("text", {}), /不支持图片/);
+});
+
+test("history images have durable references, user images stay visible, and recall shares encoding", async (t) => {
+  const root = fileURLToPath(new URL("../../.tools/tests/", import.meta.url));
+  await mkdir(root, { recursive: true });
+  const directory = await mkdtemp(join(root, "image-history-"));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const jpeg = join(directory, "encoded.jpg");
+  await writeFile(jpeg, Buffer.from([255, 216, 255, 217]));
+  const png = { type: "image", mimeType: "image/png", data: Buffer.from("original PNG bytes").toString("base64") };
+  const screen = { role: "toolResult", toolName: "screenshot", content: [png] };
+  const user = { role: "user", content: [png] };
+  let encodings = 0;
+  const images = imageStore(directory, "session", async (name, params) => {
+    assert.equal(name, "image_prepare"); assert.equal(params.session, "session"); encodings++;
+    assert.equal(await readFile(join(directory, `${params.reference}.source`), "utf8"), "original PNG bytes");
+    return { image: jpeg, mimeType: "image/jpeg", width: 576, height: 1280 };
+  }, [screen, user]);
+  const first = await images.project([screen, user]);
+  assert.equal(first[0].content.some((b) => b.type === "image"), false);
+  assert.equal(first[1].content.at(-1).mimeType, "image/jpeg");
+  const reference = first[0].content[0].text.match(/[a-f0-9]{64}/)[0];
+  assert.equal(await readFile(join(directory, `${reference}.source`), "utf8"), "original PNG bytes");
+  assert.deepEqual(await images.recall(reference), first[1].content.at(-1));
+  assert.equal(encodings, 1);
+  const next = await images.project([screen, user, { role: "toolResult", content: [png] }]);
+  assert.deepEqual(next.slice(0, 2), first);
+  assert.equal(next[2].content.at(-1).type, "image");
+  assert.equal(screen.content[0].mimeType, "image/png");
+  await assert.rejects(images.recall("../outside"), /引用无效/);
+  const restored = imageStore(directory, "session", async () => ({ image: jpeg, mimeType: "image/jpeg", width: 1281, height: 2 }));
+  await assert.rejects(restored.recall(reference), /尺寸无效/);
 });

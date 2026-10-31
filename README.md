@@ -30,13 +30,15 @@ Install the APK on Android 9 or later. Supported ABIs are ARM64 and x86-64.
 
 1. Open PhoneBot. The foreground engine starts with the app.
 2. Open **设置 → 模型服务**. Select a Pi provider. Use its API-key or browser login flow. Select a model. Press **验证连接** to send a small real request. Provider charges can apply.
-3. Open **设置 → 权限**. Enable the accessibility service. Keep the display on and unlocked. Notification permission enables the notification stop control.
+3. Open **设置 → 权限**. Enable the accessibility service. Keep the display on and unlocked. Enable notifications and the **任务结果横幅** channel to receive task results. Tap a result notification to open its conversation and task.
 4. Enter a task in the chat. Expand execution steps to inspect tool results. Use the square Stop control to cancel the task. A permission pause offers an explicit resume control after authorization.
 5. Use the drawer to find or delete conversations. Use **设置 → 停止引擎** to end the engine process. Use **启动引擎** to start a fresh process.
 
 Pi supplies the provider catalog, authentication flows, token refresh, model requests, and agent loop. Android encrypts API keys and OAuth credentials with Keystore. Provider and model defaults survive restart. A successful connection check marks that exact model as verified on this installation. Other entries remain unverified.
 
 The tools read accessibility elements, capture screenshots, recognize Chinese and English text, list and open apps, tap, swipe, enter Chinese text, go Back, and go Home. Input includes a read-back check. Actions return screen changes with a snapshot baseline. `do_steps` runs predictable actions locally and stops on a failed check or detected dialog. All coordinates use the full main display. Screenshots and OCR require Android 11 or later. Images use JPEG quality 80 and a longest edge of 1280 pixels. Image results require a vision model. Secure windows can block screenshots.
+
+Assistant replies render as Markdown, including lists, links, tables, and highlighted code with Copy. Task completion posts one result notification in foreground or background. A stable page means its tree is quiet. Actions use explicit postconditions to verify loaded results. Earlier screen images remain available by reference instead of entering every new task's requests.
 
 Page text and images can reach the selected model provider during a task. Context budgets limit old images and compress older tool rounds. Pi transcripts remain separate from the model request view. Credential login stays outside the conversation. Local conversations, task event journals, and screenshots remain in app-private storage. Task journals retain request timing, payload size, tool results, errors, and interrupted work. Delete a conversation through its drawer menu to remove its transcript and journals. Screenshot cache entries expire as new captures replace them.
 

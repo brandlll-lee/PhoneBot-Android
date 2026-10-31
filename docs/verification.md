@@ -11,12 +11,14 @@ npm --prefix runtime test
 ./scripts/gradle.ps1 connectedDebugAndroidTest
 ```
 
-The runtime tests must pass for both source and bundled entry points. They check two model HTTP requests, host tool results, repeated execution, tool errors, cancellation, catalog selection, busy rejection, Pi login, argument validation, and JPEG image content. Context tests cover stable prefixes, image limits, complete tool pairs, pressure-driven compression, reconstructed diff baselines, and interrupted tool calls. A batch fixture verifies that two local actions need one host call and two model requests.
+The runtime tests must pass for both source and bundled entry points. They check two model HTTP requests, host tool results, repeated execution, one terminal event per task, tool errors, cancellation, catalog selection, busy rejection, Pi login, argument validation, and JPEG image content. Context tests cover stable prefixes, image limits, complete tool pairs, pressure-driven compression, reconstructed diff baselines with image references, and interrupted tool calls. Image tests cover original-byte archives, historical screen references, retained user images, recall, shared encoding, and dimension rejection. A batch fixture verifies that two local actions need one host call and two model requests.
 
 The JVM test checks available controls for each engine phase. Lint treats warnings as errors.
 Dependency update advice is disabled because the build uses a pinned, compatible toolchain.
 
 Android tests cover process isolation, a Pi-to-Kotlin round trip, stop, restart, process failure, and recovery. They also cover Pi catalog/authentication, saved model selection, encrypted credential updates/deletion, Chinese input with stable IDs and read-back, ambiguous target rejection, full-screen bottom coordinates, gestures, app navigation, JPEG dimensions/mapping, and Chinese/English OCR. Batch tests check successful execution and early stop for a missing target or dialog. Journal tests cover credential redaction, torn writes, interruption recovery, and terminal states. A real Pi authentication failure must preserve its task journal and transcript.
+
+The controlled page delays a result while its tree stays quiet. Both single and batch actions must wait for their result condition. A matching input value must not satisfy a non-editable result condition. Timeout must stop remaining actions. Markdown tests cover Chinese streaming, unfinished emphasis, completed history rendering, long code, links, and wide tables. Notification tests cover terminal labels, permission checks, deduplication, and exact-task navigation on cold and warm activities. Wait for Android's asynchronous notification publication before inspecting its active list.
 
 Run the full suite on a test installation. The authentication test changes provider credentials and the default model. For the user's configured phone, select only the controlled page test:
 
@@ -24,7 +26,7 @@ Run the full suite on a test installation. The authentication test changes provi
 adb -s DEVICE shell am instrument -w -e class dev.phonebot.android.PhoneToolsTest#accessibilityReadsActsVerifiesChineseAndRecognizesPixels dev.phonebot.android.test/androidx.test.runner.AndroidJUnitRunner
 ```
 
-This test opens the debug fixture. It restores the prior accessibility setting. It does not call a cloud model.
+This test opens the real main activity and starts the engine before it opens the debug fixture. Instrumentation restarts the target process, so the fixture refreshes only PhoneBot's accessibility binding. It preserves other enabled services and restores the prior setting. It does not call a cloud model. `PresentationTest`, `TaskNavigationTest`, and `EngineIntegrationTest#runtimeRoundTripAndProcessLifecycle` can also run on a configured phone. They preserve provider credentials and model selection.
 
 ## APK inspection
 
@@ -38,19 +40,24 @@ Start the app from its launcher. Open Settings and run self-check. Check chat, d
 
 Use real provider credentials to validate cloud requests. Keep keys out of command output, test reports, and committed files. Report cloud verification separately from local fixture verification.
 
+The lifecycle test deliberately kills the engine process. Accessibility runs in that process. On the S21, Android can retain that service in its crashed-service set while its enabled setting remains present. Before another phone-tool run, switch only PhoneBot's accessibility service off and on in system settings. The validation run restored that binding after fault injection. Normal task cancellation aborts Pi and tool work; it does not kill the process. Process ownership and automatic service recovery need a separate lifecycle change.
+
 ## Validation record
 
 Validated on 2026-10-31:
 
-- Runtime tests: 17 passed. Source and bundled entry points completed the two-request tool loop. Provider authentication used test credentials and the host store. Two actions used one batch dispatch. Context tests covered image and token budgets, retained prefixes, reconstructed baselines, and interrupted tool results.
+- Runtime tests: 19 passed. Source and bundled entry points completed the two-request tool loop with one terminal event per task. Provider authentication used test credentials and the host store. Two actions used one batch dispatch. Context tests covered image and token budgets, retained prefixes, reconstructed baselines with image notes, archived references, recall, and interrupted tool results.
 - JVM tests: 1 passed.
-- Android instrumentation: 5 passed on Android 16, API 36, x86-64, with 4 KB memory pages. The controlled page test covered stable IDs, diffs, bottom coordinates, image mapping, OCR, batch success, and early stop. A failed Pi task retained both its journal and transcript.
-- Samsung S21: the controlled phone page and engine lifecycle tests passed on Android 14, API 34, ARM64. The phone test covered bottom-screen taps, Chinese input, OCR, JPEG mapping, and batch interruption. The engine test completed the local Pi transport/tool loop and process restart checks. These tests use local fixtures.
-- `assembleDebug`, `testDebugUnitTest`, `lintDebug`, and `connectedDebugAndroidTest`: passed through the project wrapper.
+- Android instrumentation: 9 passed on Android 16, API 36, x86-64, with 4 KB memory pages. The controlled page test covered stable IDs, diffs, bottom coordinates, image mapping, OCR, delayed conditions, and batch early stop. Presentation tests covered Markdown, historical PNG encoding, and terminal notification deduplication. Navigation tests covered cold and warm task opening. A failed Pi task retained both its journal and transcript.
+- Notification denial: 2 selected emulator tests passed with notification permission revoked. Terminal state recording and normal engine shutdown remained available. Three terminal labels and deduplication passed with permission granted. Android's active notification list was checked after asynchronous publication.
+- Large text: the Markdown streaming test passed at 1.3 font scale with unfinished Chinese emphasis, a long highlighted code line, and a wide table.
+- Samsung S21: 6 selected instrumentation tests passed on Android 14, API 34, ARM64. They covered delayed result conditions, input/result separation, bottom-screen taps, Chinese input, OCR, JPEG mapping, batch interruption, Markdown, historical PNG encoding, result notifications, exact-task navigation, local Pi transport, and process restarts. The APK was installed as an update. Existing credentials and model selection were preserved. These tests use local fixtures.
+- `assembleDebug`, `assembleDebugAndroidTest`, `testDebugUnitTest`, and `lintDebug`: passed through the project wrapper. Instrumentation ran through ADB with explicit device selection.
 - Lint: no issues.
 - APK ZIP alignment: passed `zipalign -c -P 16 4`.
 - Native ELF alignment: all packaged library `LOAD` segments use `0x4000` alignment.
 - APK inspection: both configured ABIs contain Node and the JNI host. The runtime bundle and notices are present.
 - Manual UI: chat, drawer, settings, provider list, and 1.3 font scale were inspected. The composer remained visible above the keyboard on a 960 × 1800 display. Seeded chat messages checked layout only. They are not cloud-task evidence.
+- Markdown UI: a seeded completed reply was inspected in the actual dark chat. Headings, bold Chinese, lists, quotes, inline code, a highlighted code block with Copy, and a table rendered in the shared answer layout. The fixture was removed after inspection.
 
-Real cloud task latency, Android API 28/37 devices, and a device with 16 KB memory pages were not part of this run. Request-count checks use a local model fixture. Node's Android distribution remains a pinned prerelease.
+Real cloud task latency and model batching choices, Android API 28/37 devices, and a device with 16 KB memory pages were not part of this run. Request-count checks use a local model fixture. Node's Android distribution remains a pinned prerelease.
