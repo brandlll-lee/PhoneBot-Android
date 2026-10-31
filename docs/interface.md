@@ -6,15 +6,15 @@ Use this contract when changing the Compose screens.
 
 The chat is the first screen. Use a near-black background, white body text, gray secondary text, and a restrained blue accent. The top bar contains the drawer, session title, new conversation, and settings controls.
 
-Align user messages to the right. Put assistant text directly on the page. Show tool execution in an expandable timeline. Show tool details only after a tap. Keep the composer above the keyboard and system navigation area. Replace Send with Stop during a task. Give each icon an accessible name and a 48 dp touch target.
+Align user messages to the right. Put Pi's final reply directly on the page. Keep intermediate text, provider-returned thinking, tool calls, tool results, screenshots, and errors inside one expandable execution trace. Preserve Pi's message and tool order. Use a thin vertical line, small gray status dots, green completed-tool dots, and red error dots. Tool details open an inset input/output panel. Expand the trace during execution and collapse it when execution ends. Keep the composer above the keyboard and system navigation area. Replace Send with Stop during a task. Give each icon an accessible name and a 48 dp touch target.
 
-Render assistant replies with the same native Markdown component during streaming, after completion, and after history restore. Keep the source Markdown in storage. Parse streaming tails off the UI thread. Keep rendered text visible during final parsing. Support headings, emphasis, lists, quotes, links, tables, and selectable text. Code blocks use syntax highlighting, Copy, and horizontal scrolling. Use the chat's dark palette and system text scaling.
+Render intermediate text and final replies with the same native Markdown component during streaming, after completion, and after history restore. Display a completed run's final text once, outside the trace. Keep that message's thinking blocks inside the trace. Keep the source Markdown in storage. Parse streaming tails off the UI thread. Keep rendered text visible during final parsing. Support headings, emphasis, lists, quotes, links, tables, and selectable text. Code blocks use syntax highlighting, Copy, and horizontal scrolling. Use the chat's dark palette and system text scaling.
 
 Use the empty state to show the product name. Keep model selection above the composer at the left. Use an outlined rounded button with the model name and a down arrow. Truncate long names. Reuse the Pi catalog and stored default. Provide a model-service management entry in the dropdown.
 
 Use a compact rounded input for short text. For wrapped or multiline text, expand the same panel upward. Put text above the Send control. Keep Send at the bottom right. Show at most five lines and scroll the text area vertically beyond that limit. Keep only Send, or Stop during execution, inside the panel. Put one muted hint below it. When submission succeeds, clear the text, remove focus, hide the keyboard, and restore the compact height. A rejected submission keeps the draft and focus.
 
-Use short state messages for loading, failure, permission pauses, and interruption. Distinguish completed, partial, blocked, failed, and stopped results. Show actual task events. Keep model reasoning private.
+Use short state messages for loading, execution ended, failure, permission pauses, and interruption. The final reply explains task outcomes and unresolved goals. Show only thinking blocks returned by the provider. A model that returns none has no thinking entry.
 
 ## Drawer
 

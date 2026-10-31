@@ -41,14 +41,14 @@ internal object MarkdownAnswer {
         return text.toString().trim()
     }
 
-    @Composable fun Content(text: String, streaming: Boolean = false) {
+    @Composable fun Content(text: String, streaming: Boolean = false, color: Color = MaterialTheme.colorScheme.onSurface) {
         val stream = rememberStreamingMarkdownState()
         LaunchedEffect(text, streaming) {
             if (streaming && text.startsWith(stream.content.toString())) withContext(Dispatchers.Default) {
                 stream.append(text.substring(stream.content.length))
             }
         }
-        val colors = markdownColor(text = MaterialTheme.colorScheme.onSurface, codeBackground = Color(0xFF222222), inlineCodeBackground = Color(0xFF2A2A2A), tableBackground = Color(0xFF1D1D1D))
+        val colors = markdownColor(text = color, codeBackground = Color(0xFF222222), inlineCodeBackground = Color(0xFF2A2A2A), tableBackground = Color(0xFF1D1D1D))
         val body = MaterialTheme.typography.bodyLarge.copy(fontSize = 17.sp, lineHeight = 28.sp)
         val typography = markdownTypography(text = body, paragraph = body, ordered = body, bullet = body, list = body,
             h1 = body.copy(fontSize = 23.sp, fontWeight = FontWeight.SemiBold), h2 = body.copy(fontSize = 21.sp, fontWeight = FontWeight.SemiBold),

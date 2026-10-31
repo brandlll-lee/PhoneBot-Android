@@ -3,9 +3,16 @@ import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { createInterface } from "node:readline";
 import { once } from "node:events";
+import { homedir } from "node:os";
+import { startFixture } from "../src/fixture.mjs";
 
-function engine(t, entry = "src/main.mjs") {
-  const child = spawn(process.execPath, [entry], { stdio: ["pipe", "pipe", "pipe"] });
+function engine(t, entry = "src/main.mjs", baseUrl) {
+  const args = baseUrl ? ["--input-type=module", "--eval", `
+    const transport = globalThis.fetch;
+    globalThis.fetch = (url, options) => transport(String(url).replace("https://api.deepseek.com", ${JSON.stringify(baseUrl)}), options);
+    await import(${JSON.stringify(new URL(`../${entry}`, import.meta.url).href)});
+  `] : [entry];
+  const child = spawn(process.execPath, args, { stdio: ["pipe", "pipe", "pipe"], env: { ...process.env, HOME: process.env.HOME ?? homedir() } });
   const events = [];
   const seen = [];
   const readers = [];
@@ -13,6 +20,10 @@ function engine(t, entry = "src/main.mjs") {
   child.stderr.on("data", (data) => { stderr += data; });
   createInterface({ input: child.stdout }).on("line", (line) => {
     const event = JSON.parse(line);
+    if (baseUrl && event.type === "tool" && event.name === "vault_read") {
+      child.stdin.write(`${JSON.stringify({ type: "tool_result", id: event.id, result: { type: "api_key", key: "fixture-key" }, secret: true })}\n`);
+      return;
+    }
     events.push(event); seen.push(event);
     readers.splice(0).forEach((notify) => notify());
   });
@@ -38,6 +49,59 @@ function engine(t, entry = "src/main.mjs") {
 }
 
 for (const entry of ["src/main.mjs", "dist/engine.mjs"]) {
+  test(`${entry}: tasks end with Pi's final reply and receive the user's original prompt`, async (t) => {
+    const call = (id, name, args) => ({ tool_calls: [{ index: 0, id, type: "function", function: { name, arguments: JSON.stringify(args) } }] });
+    const fixture = await startFixture({ turns: [
+      { reasoning_content: "先读取工具返回的真实音量。", content: "我先调整媒体音量。", ...call("volume", "volume_set", { percent: 55 }) }, { content: "媒体音量已设为 8/15。" },
+      { content: "在的。" },
+      call("launch", "app_launch", { package: "missing.app" }), { content: "手机上没有找到该应用。" },
+    ] });
+    t.after(fixture.close);
+    const host = engine(t, entry, fixture.baseUrl);
+    await host.next("ready");
+    const run = (prompt) => host.send({ type: "task", session: "conversation", provider: "deepseek", model: "deepseek-flash", prompt });
+    run("将媒体音量设为适中");
+    const volume = await host.next("tool");
+    assert.equal(volume.name, "volume_set");
+    host.send({ type: "tool_result", id: volume.id, result: { ok: true, verified: true, value: 8, max: 15, muted: false } });
+    const result = await host.next("result");
+    assert.equal(result.text, "媒体音量已设为 8/15。");
+    assert.equal(result.request, 2);
+    const thinking = host.seen.find((e) => e.type === "thinking_delta");
+    assert.equal(thinking.request, 1);
+    assert.equal(thinking.contentIndex, 0);
+    assert.equal(thinking.delta, "先读取工具返回的真实音量。");
+    const progress = host.seen.find((e) => e.type === "text_delta");
+    assert.equal(progress.request, 1);
+    assert.equal(progress.contentIndex, 1);
+    assert.equal(progress.delta, "我先调整媒体音量。");
+    assert.deepEqual(host.seen.find((e) => e.type === "model_response").content.map((b) => b.type), ["thinking", "text", "toolCall"]);
+    assert.ok(host.seen.indexOf(thinking) < host.seen.indexOf(progress));
+    assert.ok(host.seen.indexOf(progress) < host.seen.findIndex((e) => e.type === "step"));
+    assert.equal(host.seen.find((e) => e.type === "step").label, "设置媒体音量");
+    assert.equal(fixture.evidence().requests, 2);
+    assert.deepEqual(fixture.messages.findLast((m) => m.role === "user").content, [{ type: "text", text: "将媒体音量设为适中" }]);
+    await host.next("idle");
+    run("在吗");
+    const chat = await host.next("result");
+    assert.equal(chat.text, "在的。");
+    assert.equal(fixture.evidence().requests, 3);
+    assert.deepEqual(fixture.messages.findLast((m) => m.role === "user").content, [{ type: "text", text: "在吗" }]);
+    assert.equal(host.seen.filter((e) => e.taskId === chat.taskId && e.type === "tool").length, 0);
+    await host.next("idle");
+    run("打开应用");
+    const launch = await host.next("tool");
+    assert.equal(launch.name, "app_launch");
+    host.send({ type: "tool_result", id: launch.id, error: "未安装该应用" });
+    const unavailable = await host.next("result");
+    assert.equal(unavailable.text, "手机上没有找到该应用。");
+    assert.equal(fixture.evidence().requests, 5);
+    await host.next("idle");
+    for (const task of [result, chat, unavailable]) {
+      assert.equal(host.seen.filter((e) => e.taskId === task.taskId && ["result", "error", "cancelled"].includes(e.type)).length, 1);
+    }
+  });
+
   test(`${entry}: Pi makes two HTTP requests and consumes the host tool result`, async (t) => {
     const host = engine(t, entry);
     assert.equal((await host.next("ready")).pi, "1.4.0");

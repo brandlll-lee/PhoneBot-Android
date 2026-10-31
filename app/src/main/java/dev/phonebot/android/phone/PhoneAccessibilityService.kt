@@ -134,10 +134,6 @@ class PhoneAccessibilityService : AccessibilityService() {
         check(available()) { "请亮屏并解锁手机" }
         if (name == "screen_read") return read(params.optBoolean("ocr"), params.optBoolean("image"))
         if (name == "screenshot") return read(false, true)
-        if (name == "screen_check") {
-            screen.scan()
-            return screen.present(true).put("ok", screen.condition(params.getJSONObject("condition")))
-        }
         if (name == "app_list") {
             val intent = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER)
             val apps = packageManager.queryIntentActivities(intent, 0).distinctBy { it.activityInfo.packageName }.sortedBy { it.loadLabel(packageManager).toString() }

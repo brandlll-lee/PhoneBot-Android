@@ -38,12 +38,10 @@ const definitions = [
   ["do_steps", "连续操作", 'Execute 1–12 known actions using the same arguments, waits and checks as single actions. Current element IDs are allowed; use semantic selectors on later pages. Stop at unknown UI. Example: input_text {resourceId:"known input",text:"query"}, tap {text:"Search",expect:{resourceId:"known result",text:"query"}}. Do not batch payments, sending, deletion, login or confirmations.', { steps: Type.Array(batch, { minItems: 1, maxItems: 12 }) }],
 ];
 
-export function phoneTools(host, model, attachment = () => {}, images, evidence) {
+export function phoneTools(host, model, attachment = () => {}, images) {
   const tools = definitions.map(([name, label, description, schema]) => ({
     name, label, description, parameters: Type.Object(schema, { additionalProperties: false }),
     async execute(id, params, signal) {
-      if (evidence?.finished) throw new Error("任务已结束");
-      evidence?.record(id, name, params, { ok: false });
       const details = await host(name, params, signal, id);
       const { image, ...view } = details;
       const content = [{ type: "text", text: JSON.stringify(view) }];
@@ -53,16 +51,9 @@ export function phoneTools(host, model, attachment = () => {}, images, evidence)
         attachment(image);
         content.push({ type: "image", data: (await readFile(image)).toString("base64"), mimeType: details.imageInfo?.mimeType || "image/jpeg" });
       }
-      evidence?.record(id, name, params, details);
       return { content, details: view, isError: view.ok === false };
     },
   }));
-  if (evidence) tools.push({ name: "task_finish", label: "核对任务结果",
-    description: "Finish this task with its current evidence. Use completed only after all requested goals hold. Each screen claim needs a condition checked against a fresh screen. For visual-only targets, cite an image you actually inspected from this task's very last tool call and describe its visible proof. Cite this task's tool call IDs, never historical calls. Use partial/blocked for unmet goals. Use answered only for conversation with no device tool calls. This tool ends execution; include the final Chinese Markdown answer in summary.",
-    parameters: Type.Object({ outcome: Type.Union(["completed", "partial", "blocked", "answered"].map(Type.Literal)), summary: text,
-      evidence: Type.Array(Type.Object({ callId: text, claim: text, condition: Type.Optional(condition) }, { additionalProperties: false }), { maxItems: 8 }) }, { additionalProperties: false }),
-    execute: async (_id, params, signal) => { const result = await evidence.finish(params, signal); return { content: [{ type: "text", text: JSON.stringify(result) }], details: result }; },
-  });
   if (images) tools.push({ name: "image_recall", label: "回看图片", description: "Retrieve an archived image by its reference when the user refers to an earlier screenshot. It is historical evidence, not the current screen.",
     parameters: Type.Object({ reference: Type.String({ pattern: "^[a-f0-9]{64}$" }) }, { additionalProperties: false }),
     execute: async (_id, { reference }) => {

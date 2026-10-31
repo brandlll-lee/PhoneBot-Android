@@ -4,10 +4,23 @@ import android.app.NotificationManager
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.captureToImage
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.onRoot
+import androidx.compose.ui.test.performClick
+import androidx.compose.ui.unit.dp
 import androidx.test.platform.app.InstrumentationRegistry
 import dev.phonebot.android.engine.ModelImages
 import dev.phonebot.android.engine.TaskJournal
@@ -21,6 +34,59 @@ import org.junit.Test
 class PresentationTest {
     @get:Rule val compose = createComposeRule()
     private val context = InstrumentationRegistry.getInstrumentation().targetContext
+
+    @Test fun piMessagesStayOrderedInTheTraceAndFinalReplyStaysOutside() {
+        val events = listOf(
+            """{"type":"thinking_delta","request":1,"contentIndex":0,"delta":"先确认当前页面。"}""",
+            """{"type":"text_delta","request":1,"contentIndex":1,"delta":"我先读取页面。"}""",
+            """{"type":"model_response","request":1,"content":[{"type":"thinking","thinking":"先确认当前页面。"},{"type":"text","text":"我先读取页面。"},{"type":"toolCall","id":"read","name":"screen_read"}]}""",
+            """{"type":"step","id":"read","name":"screen_read","label":"读取页面","args":{"ocr":true}}""",
+            """{"type":"step_result","id":"read","error":false,"text":"已找到相册页面"}""",
+            """{"type":"thinking_delta","request":2,"contentIndex":0,"delta":"页面显示相册。"}""",
+            """{"type":"text_delta","request":2,"contentIndex":1,"delta":"**相册已打开**"}""",
+            """{"type":"model_response","request":2,"content":[{"type":"thinking","thinking":"页面显示相册。"},{"type":"text","text":"**相册已打开**"}]}""",
+            """{"type":"result","request":2,"text":"**相册已打开**"}""",
+        ).map { JSONObject(it).put("taskId", "presentation-trace") }
+        val current = events.dropLast(1).fold(ChatTurn("presentation-trace", "打开相册")) { turn, event -> turn.event(event) }
+        assertEquals("", current.answer)
+        val finished = current.event(events.last())
+        assertEquals(listOf("thinking", "text", "tool", "thinking"), finished.steps.map { it.kind })
+        assertEquals("**相册已打开**", finished.answer)
+        assertEquals(1, finished.steps.count { it.kind == "text" })
+        assertEquals("读取页面", finished.steps.single { it.kind == "tool" }.name)
+
+        val journal = TaskJournal(File(context.cacheDir, "trace-events"))
+        val file = File(context.cacheDir, "trace-events/presentation-trace.jsonl")
+        try {
+            file.delete()
+            events.forEach(journal::append)
+            assertEquals(finished, journal.records(file).fold(ChatTurn("presentation-trace", "打开相册")) { turn, event -> turn.event(event) })
+        } finally { file.delete() }
+        val failed = current.event(JSONObject("""{"type":"error","message":"模型请求中断"}"""))
+        assertEquals("", failed.answer)
+        assertTrue(failed.steps.last().error)
+        assertEquals("模型请求中断", failed.steps.last().detail)
+
+        val turn = mutableStateOf(current)
+        compose.setContent { PhoneBotTheme { Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
+            Column(Modifier.verticalScroll(rememberScrollState()).padding(20.dp)) { ChatTurnView(turn.value, turn.value.status == "running") }
+        } } }
+        compose.onNodeWithTag("execution_trace").assertIsDisplayed()
+        compose.onNodeWithText("先确认当前页面。").assertIsDisplayed()
+        compose.runOnIdle { turn.value = finished }
+        compose.onNodeWithTag("execution_trace").assertDoesNotExist()
+        compose.waitUntil(5000) { compose.onAllNodes(androidx.compose.ui.test.hasText("相册已打开")).fetchSemanticsNodes().isNotEmpty() }
+        compose.onNodeWithText("相册已打开").assertIsDisplayed()
+        File(context.cacheDir, "trace-collapsed.png").outputStream().use { compose.onRoot().captureToImage().asAndroidBitmap().compress(Bitmap.CompressFormat.PNG, 100, it) }
+        compose.onNodeWithTag("execution_toggle").performClick()
+        compose.onNodeWithTag("tool-read").performClick()
+        compose.onNodeWithText("输入").assertIsDisplayed()
+        compose.onNodeWithText("输出").assertIsDisplayed()
+        File(context.cacheDir, "trace-expanded.png").outputStream().use { compose.onRoot().captureToImage().asAndroidBitmap().compress(Bitmap.CompressFormat.PNG, 100, it) }
+        compose.onNodeWithTag("execution_toggle").performClick()
+        compose.onNodeWithText("先确认当前页面。").assertDoesNotExist()
+        compose.onNodeWithText("相册已打开").assertIsDisplayed()
+    }
 
     @Test fun markdownStreamsChineseAndKeepsCodeAndTables() {
         val source = mutableStateOf("**中文")
@@ -55,11 +121,11 @@ class PresentationTest {
         val manager = context.getSystemService(NotificationManager::class.java)
         TaskNotifications.channel(context)
         val allowed = manager.areNotificationsEnabled() && manager.getNotificationChannel(TaskNotifications.CHANNEL).importance != NotificationManager.IMPORTANCE_NONE
-        for ((type, outcome, title) in listOf(Triple("result", "", "执行结束"), Triple("result", "completed", "任务完成"), Triple("result", "partial", "部分完成"), Triple("result", "blocked", "任务受阻"), Triple("error", "", "执行失败"), Triple("cancelled", "", "已停止"))) {
-            val id = "presentation-notification-$type-$outcome"
+        for ((type, title) in listOf("result" to "执行结束", "error" to "执行失败", "cancelled" to "已停止")) {
+            val id = "presentation-notification-$type"
             val file = File(context.filesDir, "task-events/$id.jsonl")
             val start = JSONObject().put("type", "task_open").put("taskId", id).put("session", "presentation-session").put("prompt", "测试任务")
-            val end = JSONObject().put("type", type).put("taskId", id).put("outcome", outcome).put("text", "**已完成**")
+            val end = JSONObject().put("type", type).put("taskId", id).put("text", "**已完成**")
             try {
                 file.delete()
                 journal.append(start); journal.append(end)

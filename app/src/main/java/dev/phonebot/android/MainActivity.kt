@@ -27,6 +27,7 @@ import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.gestures.animateScrollBy
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
@@ -39,6 +40,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.rotate
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -51,6 +54,7 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
@@ -97,7 +101,7 @@ private val Group = Color(0xFF282828)
 private val Muted = Color(0xFF999999)
 private val Accent = Color(0xFF88ABFF)
 
-@Composable private fun PhoneBotTheme(content: @Composable () -> Unit) {
+@Composable internal fun PhoneBotTheme(content: @Composable () -> Unit) {
     MaterialTheme(colorScheme = darkColorScheme(primary = Accent, onPrimary = Background, background = Background, surface = Sheet,
         surfaceContainer = Group, onSurface = Color(0xFFF1F1F1), onSurfaceVariant = Muted, outlineVariant = Color(0xFF393939)), content = content)
 }
@@ -341,47 +345,74 @@ private val Accent = Color(0xFF88ABFF)
     }
 }
 
-@Composable private fun ChatTurnView(turn: ChatTurn, running: Boolean) {
+@Composable internal fun ChatTurnView(turn: ChatTurn, running: Boolean) {
     Column(verticalArrangement = Arrangement.spacedBy(24.dp)) {
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
             SelectionContainer(Modifier.widthIn(max = 310.dp).clip(RoundedCornerShape(22.dp, 22.dp, 6.dp, 22.dp)).background(Color(0xFF303030)).padding(16.dp, 13.dp)) {
                 Text(turn.prompt, fontSize = 17.sp, lineHeight = 26.sp)
             }
         }
-        if (turn.steps.isNotEmpty()) {
-            var expanded by rememberSaveable(turn.id) { mutableStateOf(true) }
+        if (turn.steps.isNotEmpty() || turn.image.isNotEmpty() || running) {
+            var expanded by rememberSaveable(turn.id, running) { mutableStateOf(running) }
             Column {
-                Row(Modifier.fillMaxWidth().clickable { expanded = !expanded }.padding(vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Text(if (running) "正在执行" else "执行了 ${turn.steps.size} 个步骤", fontSize = 15.sp, color = Muted, fontWeight = FontWeight.Medium)
+                Row(Modifier.fillMaxWidth().heightIn(min = 48.dp).testTag("execution_toggle").clickable { expanded = !expanded }, verticalAlignment = Alignment.CenterVertically) {
+                    Text(when { running -> "正在执行"; turn.status == "error" -> "执行失败"; turn.status == "stopped" -> "已停止";
+                        turn.status == "interrupted" -> "任务已中断"; else -> "执行过程" }, fontSize = 15.sp, color = Muted, fontWeight = FontWeight.Medium)
                     Icon(Icons.Outlined.KeyboardArrowDown, null, tint = Muted, modifier = Modifier.padding(start = 6.dp).size(20.dp).rotate(if (expanded) 0f else -90f))
                 }
-                if (expanded) turn.steps.forEach { step ->
-                    var detail by remember { mutableStateOf(false) }
-                    Row(Modifier.fillMaxWidth().padding(top = 12.dp).clickable { detail = !detail }) {
-                        Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.width(26.dp)) {
-                            if (!step.done && running) CircularProgressIndicator(Modifier.size(14.dp), color = Accent, strokeWidth = 1.5.dp)
-                            else Icon(if (step.error) Icons.Outlined.Warning else Icons.Outlined.Check, null, tint = if (step.error) MaterialTheme.colorScheme.error else Muted, modifier = Modifier.size(17.dp))
-                            Spacer(Modifier.height(6.dp))
-                            Box(Modifier.width(1.dp).height(if (detail) 64.dp else 24.dp).background(Color(0xFF424242)))
+                if (expanded) {
+                    Column(Modifier.fillMaxWidth().testTag("execution_trace").drawBehind {
+                        drawLine(Color(0xFF333333), Offset(8.dp.toPx(), 12.dp.toPx()), Offset(8.dp.toPx(), size.height - 12.dp.toPx()), 1.dp.toPx())
+                    }) {
+                        if (running && turn.steps.isEmpty()) Text("正在等待模型", color = Muted, fontSize = 14.sp, modifier = Modifier.padding(start = 30.dp, top = 8.dp, bottom = 8.dp))
+                        turn.steps.forEach { step -> key(step.id) {
+                            Row(Modifier.fillMaxWidth().padding(vertical = 10.dp)) {
+                                val dot = if (step.error) MaterialTheme.colorScheme.error else if (step.kind == "tool" && step.done) Color(0xFF77C69B) else Muted
+                                Box(Modifier.width(16.dp).padding(top = if (step.kind == "tool") 21.dp else 9.dp), contentAlignment = Alignment.TopCenter) {
+                                    if (!step.done && running) CircularProgressIndicator(Modifier.size(10.dp), color = Muted, strokeWidth = 1.dp)
+                                    else Box(Modifier.size(7.dp).background(dot, CircleShape))
+                                }
+                                Column(Modifier.weight(1f).padding(start = 14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                    when (step.kind) {
+                                        "tool" -> {
+                                            var detail by rememberSaveable(step.id) { mutableStateOf(false) }
+                                            Row(Modifier.fillMaxWidth().heightIn(min = 48.dp).testTag("tool-${step.id}").clickable { detail = !detail }, verticalAlignment = Alignment.CenterVertically) {
+                                                Text(step.name, color = MaterialTheme.colorScheme.onSurface, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
+                                                Icon(Icons.Outlined.KeyboardArrowDown, null, tint = Muted, modifier = Modifier.size(18.dp).rotate(if (detail) 0f else -90f))
+                                            }
+                                            if (detail) SelectionContainer {
+                                                Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp)).background(Background).border(1.dp, Color(0xFF333333), RoundedCornerShape(8.dp))) {
+                                                    Text("输入", color = Muted, fontSize = 11.sp, modifier = Modifier.padding(10.dp, 6.dp))
+                                                    Text(step.args, color = Muted, fontFamily = FontFamily.Monospace, fontSize = 12.sp, lineHeight = 18.sp,
+                                                        modifier = Modifier.horizontalScroll(rememberScrollState()).padding(10.dp, 6.dp))
+                                                    HorizontalDivider(color = Color(0xFF333333))
+                                                    Text("输出", color = Muted, fontSize = 11.sp, modifier = Modifier.padding(10.dp, 6.dp))
+                                                    Text(step.detail, color = if (step.error) MaterialTheme.colorScheme.error else Muted, fontFamily = FontFamily.Monospace, fontSize = 12.sp, lineHeight = 18.sp,
+                                                        modifier = Modifier.horizontalScroll(rememberScrollState()).padding(10.dp, 6.dp))
+                                                }
+                                            }
+                                        }
+                                        "thinking" -> {
+                                            Text("思考", color = Muted, fontSize = 12.sp)
+                                            SelectionContainer { Text(step.detail, color = Muted, fontSize = 14.sp, lineHeight = 22.sp) }
+                                        }
+                                        "text" -> MarkdownAnswer.Content(step.detail, running && !step.done, Muted)
+                                        else -> SelectionContainer { Text(step.detail, color = if (step.error) MaterialTheme.colorScheme.error else Muted, fontSize = 14.sp, lineHeight = 22.sp) }
+                                    }
+                                }
+                            }
+                        } }
+                    }
+                    if (turn.image.isNotEmpty()) {
+                        val bitmap by produceState<android.graphics.Bitmap?>(null, turn.image) {
+                            value = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { BitmapFactory.decodeFile(turn.image, BitmapFactory.Options().apply { inSampleSize = 3 }) }
                         }
-                        Column(Modifier.weight(1f).padding(start = 6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                            Text(toolName(step.name), color = Muted, fontSize = 15.sp)
-                            if (detail) SelectionContainer { Text(if (step.detail.isEmpty()) step.args else step.detail, color = Muted, fontSize = 12.sp, lineHeight = 18.sp, maxLines = 16, overflow = TextOverflow.Ellipsis) }
-                        }
+                        bitmap?.let { Image(it.asImageBitmap(), "任务截图", Modifier.fillMaxWidth(.6f).heightIn(max = 240.dp).clip(RoundedCornerShape(12.dp))) }
                     }
                 }
             }
         }
-        if (turn.answer.isNotBlank()) MarkdownAnswer.Content(turn.answer, running)
-        if (turn.image.isNotEmpty()) {
-            val bitmap by produceState<android.graphics.Bitmap?>(null, turn.image) {
-                value = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { BitmapFactory.decodeFile(turn.image, BitmapFactory.Options().apply { inSampleSize = 3 }) }
-            }
-            bitmap?.let { Image(it.asImageBitmap(), "任务截图", Modifier.fillMaxWidth(.6f).heightIn(max = 240.dp).clip(RoundedCornerShape(12.dp))) }
-        }
-        if (running && turn.answer.isEmpty() && turn.steps.isEmpty()) CircularProgressIndicator(Modifier.size(18.dp), color = Muted, strokeWidth = 2.dp)
-        if (turn.status in listOf("stopped", "interrupted")) Text(if (turn.status == "stopped") "已停止" else "任务已中断", fontSize = 13.sp, color = Muted)
-        if (turn.status in listOf("partial", "blocked")) Text(if (turn.status == "partial") "部分完成" else "任务受阻", fontSize = 13.sp, color = Muted)
+        if (turn.answer.isNotBlank()) MarkdownAnswer.Content(turn.answer)
     }
 }
 
@@ -494,10 +525,6 @@ private val Accent = Color(0xFF88ABFF)
 private fun phaseName(phase: EnginePhase) = when (phase) {
     EnginePhase.STOPPED -> "已停止"; EnginePhase.STARTING -> "正在启动"; EnginePhase.READY -> "就绪"
     EnginePhase.RUNNING -> "运行中"; EnginePhase.STOPPING -> "正在停止"; EnginePhase.FAILED -> "启动失败"
-}
-private fun toolName(name: String) = when (name) {
-    "screen_read" -> "读取页面"; "screenshot" -> "截取屏幕"; "app_list" -> "查看应用"; "app_launch" -> "打开应用"
-    "tap" -> "点击"; "swipe" -> "滑动"; "input_text" -> "输入文字并核对"; "back" -> "返回"; "home" -> "回到主页"; else -> name
 }
 private fun dateGroup(time: Long): String {
     val date = Instant.ofEpochMilli(time).atZone(ZoneId.systemDefault()).toLocalDate()
