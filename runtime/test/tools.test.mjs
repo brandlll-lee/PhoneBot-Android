@@ -37,3 +37,20 @@ test("Pi validates phone arguments before dispatch", async (t) => {
   assert.equal(calls, 0);
   assert.ok(agent.state.messages.some((m) => m.role === "toolResult" && m.isError));
 });
+
+test("Pi dispatches two locally checked actions in one tool round trip", async (t) => {
+  const steps = [{ tool: "tap", args: { text: "设置" }, expect: { text: "语言" } }, { tool: "tap", args: { text: "语言" } }];
+  const fixture = await startFixture({ tool: "do_steps", params: { steps } });
+  t.after(fixture.close);
+  const model = { id: "phone", name: "phone", provider: "fixture", api: "openai-completions", baseUrl: fixture.baseUrl,
+    reasoning: false, input: ["text"], contextWindow: 10000, maxTokens: 1000, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 } };
+  const models = createModels();
+  models.setProvider(createProvider({ id: "fixture", models: [model], auth: { apiKey: { name: "fixture", resolve: async () => ({ auth: { apiKey: "fixture" } }) } }, api: { stream, streamSimple } }));
+  const calls = [];
+  const agent = new Agent({ initialState: { model, tools: phoneTools(async (name, args) => {
+    calls.push({ name, args }); return { ok: true, steps: [{ ok: true }, { ok: true }], screen: { kind: "full", snapshot: 1, elements: [] } };
+  }, model) }, streamFn: models.streamSimple.bind(models), toolExecution: "sequential" });
+  await agent.prompt("打开设置中的语言页面");
+  assert.deepEqual(calls, [{ name: "do_steps", args: { steps } }]);
+  assert.equal(fixture.evidence().requests, 2);
+});

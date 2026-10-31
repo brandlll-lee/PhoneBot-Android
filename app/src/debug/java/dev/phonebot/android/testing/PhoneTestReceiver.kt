@@ -9,6 +9,7 @@ import dev.phonebot.android.phone.PhoneAccessibilityService
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.withTimeout
 import org.json.JSONObject
 
@@ -19,6 +20,7 @@ class PhoneTestReceiver : BroadcastReceiver() {
         CoroutineScope(Dispatchers.Main).launch {
             try {
                 val output = withTimeout(15000) {
+                    while (PhoneAccessibilityService.instance == null) delay(100)
                     val service = checkNotNull(PhoneAccessibilityService.instance) { "无障碍服务未连接" }
                     service.execute(intent.getStringExtra("tool")!!, JSONObject(intent.getStringExtra("params") ?: "{}"))
                 }

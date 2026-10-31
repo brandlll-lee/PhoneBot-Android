@@ -1,0 +1,140 @@
+package dev.phonebot.android.phone
+
+import android.accessibilityservice.AccessibilityService
+import android.graphics.Point
+import android.graphics.Rect
+import android.hardware.display.DisplayManager
+import android.os.Build
+import android.view.Display
+import android.view.accessibility.AccessibilityNodeInfo
+import org.json.JSONArray
+import org.json.JSONObject
+
+internal fun Rect.json() = JSONArray(listOf(left, top, right, bottom))
+
+internal data class ScreenGeometry(val width: Int, val height: Int, val rotation: Int, val window: Rect, val content: Rect) {
+    fun json(): JSONObject = JSONObject().put("displayId", Display.DEFAULT_DISPLAY).put("rotation", rotation)
+        .put("fullBounds", Rect(0, 0, width, height).json()).put("windowBounds", window.json()).put("contentBounds", content.json())
+    fun point(x: Double, y: Double): Pair<Float, Float> {
+        require(x.isFinite() && y.isFinite() && x == x.toInt().toDouble() && y == y.toInt().toDouble() && x >= 0 && x < width && y >= 0 && y < height) { "坐标超出屏幕" }
+        return x.toFloat() to y.toFloat()
+    }
+    companion object {
+        @Suppress("DEPRECATION")
+        fun read(service: AccessibilityService, root: AccessibilityNodeInfo): ScreenGeometry {
+            val display = checkNotNull(service.getSystemService(DisplayManager::class.java).getDisplay(Display.DEFAULT_DISPLAY))
+            // Gesture coordinates use the rotated logical display, including system bars.
+            val size = Point().also(display::getRealSize)
+            val full = Rect(0, 0, size.x, size.y)
+            val window = Rect().also { out -> service.windows.firstOrNull { it.id == root.windowId }?.getBoundsInScreen(out) }
+            if (!window.intersect(full)) window.set(full)
+            val content = Rect().also(root::getBoundsInScreen)
+            if (!content.intersect(window)) content.set(window)
+            return ScreenGeometry(size.x, size.y, display.rotation, window, content)
+        }
+    }
+}
+
+internal class ScreenState(private val service: AccessibilityService) {
+    private data class Entry(val id: String, val node: AccessibilityNodeInfo, val key: String, val unique: String?, val value: JSONObject)
+    private var issued = 0L
+    private var sequence = 0L
+    private var scope = ""
+    private var entries = emptyList<Entry>()
+    private val remembered = linkedMapOf<String, Entry>()
+    private var shown: JSONObject? = null
+    lateinit var geometry: ScreenGeometry; private set
+    var latest = JSONObject(); private set
+
+    fun reset() { entries = emptyList(); remembered.clear(); shown = null; scope = "" }
+
+    private fun identity(node: AccessibilityNodeInfo, ancestry: String): String =
+        "$ancestry|${node.className}|${node.viewIdResourceName}|${if (node.isPassword) "" else node.contentDescription?.toString()?.take(120).orEmpty()}|${if (node.isEditable || node.isPassword) "" else node.text?.toString()?.take(120).orEmpty()}"
+
+    fun scan(): JSONObject {
+        val root = service.rootInActiveWindow ?: error("当前页面不可读取。请切换页面后重试。")
+        geometry = ScreenGeometry.read(service, root)
+        val nextScope = "${root.packageName}:${root.windowId}:${geometry.width}:${geometry.height}:${geometry.rotation}"
+        if (scope != nextScope) { reset(); scope = nextScope }
+        val collected = mutableListOf<Pair<AccessibilityNodeInfo, String>>()
+        var scanned = 0
+        fun visit(node: AccessibilityNodeInfo, ancestry: String) {
+            if (++scanned > 1500) return
+            if (node.isVisibleToUser && (node.text?.isNotBlank() == true || node.contentDescription?.isNotBlank() == true || node.isClickable || node.isEditable || node.isScrollable)) collected += node to ancestry
+            val parent = "$ancestry/${node.viewIdResourceName.orEmpty()}:${node.className}"
+            for (index in 0 until node.childCount) node.getChild(index)?.let { visit(it, parent) }
+        }
+        visit(root, "")
+        val old = entries
+        val used = mutableSetOf<String>()
+        val identities = collected.take(80).groupingBy { (node, ancestry) -> identity(node, ancestry) }.eachCount()
+        entries = collected.take(80).map { (node, ancestry) ->
+            val text = if (node.isPassword) "[受保护输入]" else node.text?.toString()?.take(120).orEmpty()
+            val description = if (node.isPassword) "" else node.contentDescription?.toString()?.take(120).orEmpty()
+            val key = identity(node, ancestry)
+            val unique = if (Build.VERSION.SDK_INT >= 33) node.uniqueId else null
+            val matches = old.filter { it.id !in used && it.key == key }
+            val exact = matches.filter { if (unique != null) it.unique == unique else it.node == node }
+            val previous = exact.singleOrNull() ?: matches.singleOrNull()?.takeIf { identities[key] == 1 }
+            val id = previous?.id ?: "e${++issued}"
+            used += id
+            val bounds = Rect().also(node::getBoundsInScreen)
+            val value = JSONObject().put("id", id).put("resourceId", node.viewIdResourceName.orEmpty()).put("text", text).put("description", description)
+                .put("bounds", bounds.json()).put("clickable", node.isClickable).put("editable", node.isEditable).put("enabled", node.isEnabled)
+                .put("focused", node.isFocused).put("selected", node.isSelected).put("class", node.className?.toString())
+            Entry(id, node, key, unique, value)
+        }
+        entries.forEach { remembered[it.id] = it }
+        while (remembered.size > 320) remembered.remove(remembered.keys.first())
+        latest = JSONObject().put("snapshot", ++sequence).put("page", scope).put("package", root.packageName)
+            .put("width", geometry.width).put("height", geometry.height).put("geometry", geometry.json())
+            .put("elements", JSONArray(entries.map { it.value })).put("truncated", collected.size > entries.size || scanned > 1500)
+        return latest
+    }
+
+    fun resolve(params: JSONObject): AccessibilityNodeInfo {
+        val id = params.optString("element")
+        val candidates = if (id.isNotEmpty()) {
+            val original = remembered[id] ?: error("元素编号已过期。请重新读取页面。")
+            entries.filter { it.key == original.key }.let { matches ->
+                matches.filter { it.id == id }.singleOrNull()?.let(::listOf) ?: matches
+            }
+        } else {
+            require(params.has("text") || params.has("resourceId")) { "请提供目标元素、文字或资源 ID" }
+            entries.filter { entry ->
+                val node = entry.node
+                !node.isPassword && (!params.has("text") || node.text?.toString() == params.getString("text") || node.contentDescription?.toString() == params.getString("text")) &&
+                    (!params.has("resourceId") || node.viewIdResourceName == params.getString("resourceId"))
+            }
+        }
+        check(candidates.size == 1) { "目标不存在或匹配不唯一。请重新读取页面。" }
+        val node = candidates.single().node
+        check(node.refresh() && node.isVisibleToUser && node.isEnabled) { "目标不可操作。请重新读取页面。" }
+        return node
+    }
+
+    fun text(): Set<String> = entries.filterNot { it.node.isPassword }.mapNotNull { it.node.text?.toString() }.toSet()
+    fun editable(): AccessibilityNodeInfo? = entries.map { it.node }.singleOrNull { it.isEditable && it.isFocused && !it.isPassword }
+
+    fun fingerprint(): String = latest.optString("page") + entries.joinToString { it.value.toString() }
+
+    fun present(full: Boolean): JSONObject {
+        val current = latest
+        val base = shown
+        val values = entries.associate { it.id to it.value }
+        val old = base?.optJSONArray("elements")?.let { array -> (0 until array.length()).associate { array.getJSONObject(it).let { value -> value.getString("id") to value } } }.orEmpty()
+        val retained = values.keys.intersect(old.keys).size
+        val replace = full || base == null || base.getString("page") != current.getString("page") || retained < minOf(old.size, values.size) / 2
+        val result = JSONObject(current.toString())
+        if (!replace) {
+            result.remove("elements")
+            result.put("baseSnapshot", base!!.getLong("snapshot"))
+                .put("added", JSONArray(values.filterKeys { it !in old }.values.toList()))
+                .put("removed", JSONArray(old.keys.filter { it !in values }))
+                .put("updated", JSONArray(values.filter { (id, value) -> id in old && value.toString() != old[id].toString() }.values.toList()))
+        }
+        result.put("kind", if (replace) "full" else "diff")
+        shown = JSONObject(current.toString())
+        return result
+    }
+}

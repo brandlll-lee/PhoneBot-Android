@@ -11,6 +11,7 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import dev.phonebot.android.engine.EngineClient
 import dev.phonebot.android.engine.EnginePhase
+import dev.phonebot.android.engine.TaskJournal
 import dev.phonebot.android.phone.PhonePermissions
 import java.io.File
 import java.util.UUID
@@ -32,10 +33,22 @@ data class PiModel(val id: String, val name: String, val image: Boolean)
 
 fun JSONArray.objects(): List<JSONObject> = (0 until length()).map(::getJSONObject)
 
+private fun ChatTurn.event(event: JSONObject): ChatTurn = when (event.optString("type")) {
+    "text" -> copy(answer = answer + event.getString("delta"))
+    "attachment" -> copy(image = event.getString("path"))
+    "step" -> copy(steps = steps.filterNot { it.id == event.getString("id") } + TaskStep(event.getString("id"), event.getString("name"), event.optJSONObject("args")?.toString().orEmpty()))
+    "step_result" -> copy(steps = steps.map { if (it.id == event.getString("id")) it.copy(done = true, error = event.optBoolean("error"), detail = event.optString("text")) else it })
+    "result" -> copy(answer = event.getString("text"), status = "done")
+    "error", "cancelled", "interrupted" -> copy(status = when (event.getString("type")) { "cancelled" -> "stopped"; "interrupted" -> "interrupted"; else -> "error" },
+        answer = event.optString("message", "任务已停止").let { if (answer.isBlank()) it else "$answer\n\n$it" })
+    else -> this
+}
+
 class PhoneBotModel(application: Application) : AndroidViewModel(application) {
     val engine = EngineClient(application)
     private val preferences = application.getSharedPreferences("phonebot", 0)
     private val historyFile = AtomicFile(File(application.filesDir, "chats.json"))
+    private val journalDirectory = File(application.filesDir, "task-events")
     var sessions by mutableStateOf(listOf<ChatSession>()); private set
     var selectedSession by mutableStateOf(""); private set
     var provider by mutableStateOf(preferences.getString("provider", "").orEmpty()); private set
@@ -61,13 +74,25 @@ class PhoneBotModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             try {
                 val loaded = withContext(Dispatchers.IO) {
-                    if (!historyFile.baseFile.exists()) emptyList() else JSONArray(String(historyFile.readFully(), Charsets.UTF_8)).objects().map { value ->
+                    var restored = if (!historyFile.baseFile.exists()) emptyList() else JSONArray(String(historyFile.readFully(), Charsets.UTF_8)).objects().map { value ->
                         ChatSession(value.getString("id"), value.getString("title"), value.getLong("updated"), value.getJSONArray("turns").objects().map { turn ->
                             ChatTurn(turn.getString("id"), turn.getString("prompt"), turn.optString("answer"),
-                                turn.getJSONArray("steps").objects().map { TaskStep(it.getString("id"), it.getString("name"), it.optString("args"), it.optString("detail"), true, it.optBoolean("error")) },
+                                turn.getJSONArray("steps").objects().map { TaskStep(it.getString("id"), it.getString("name"), it.optString("args"), it.optString("detail"), it.optBoolean("done", true), it.optBoolean("error")) },
                                 turn.optString("status").let { if (it == "running") "interrupted" else it }, turn.optString("image"))
                         })
                     }
+                    val journal = TaskJournal(journalDirectory)
+                    journalDirectory.listFiles()?.filter { it.extension == "jsonl" }?.sortedBy { it.lastModified() }?.forEach { file ->
+                        val events = journal.records(file)
+                        val start = events.firstOrNull { it.optString("type") == "task_open" } ?: return@forEach
+                        val id = start.getString("session")
+                        var turn = ChatTurn(start.getString("taskId"), start.getString("prompt"))
+                        events.forEach { turn = turn.event(it) }
+                        if (turn.status == "running") turn = turn.copy(status = "interrupted")
+                        val session = restored.find { it.id == id } ?: ChatSession(id, turn.prompt.take(30), start.optLong("time"))
+                        restored = restored.filterNot { it.id == id } + session.copy(turns = session.turns.filterNot { it.id == turn.id } + turn)
+                    }
+                    restored.sortedByDescending { it.updated }
                 }
                 sessions = loaded
                 selectedSession = loaded.firstOrNull()?.id.orEmpty()
@@ -100,7 +125,11 @@ class PhoneBotModel(application: Application) : AndroidViewModel(application) {
         sessions = sessions.filter { it.id != id }
         if (selectedSession == id) selectedSession = sessions.firstOrNull()?.id.orEmpty()
         if (sessions.isEmpty()) newSession() else save()
-        viewModelScope.launch(Dispatchers.IO) { File(getApplication<Application>().filesDir, "transcripts/$id.json").delete() }
+        viewModelScope.launch(Dispatchers.IO) {
+            File(getApplication<Application>().filesDir, "transcripts/$id.json").delete()
+            val journal = TaskJournal(journalDirectory)
+            journalDirectory.listFiles()?.filter { file -> journal.records(file).firstOrNull()?.optString("session") == id }?.forEach { it.delete() }
+        }
     }
     fun choose(providerId: String, modelId: String) {
         provider = providerId; model = modelId
@@ -183,14 +212,11 @@ class PhoneBotModel(application: Application) : AndroidViewModel(application) {
             "auth_prompt" -> authPrompt = event
             "auth_event" -> authEvent = event
             "permission" -> { permission = event.getString("permission"); refreshPermissions() }
-            "text" -> if (event.optString("taskId") == activeTask) changeTurn { it.copy(answer = it.answer + event.getString("delta")) }
-            "attachment" -> if (event.optString("taskId") == activeTask) changeTurn { it.copy(image = event.getString("path")) }
-            "step" -> if (event.optString("taskId") == activeTask) changeTurn { it.copy(steps = it.steps + TaskStep(event.getString("id"), event.getString("name"), event.optJSONObject("args")?.toString().orEmpty())) }
-            "step_result" -> if (event.optString("taskId") == activeTask) changeTurn { turn -> turn.copy(steps = turn.steps.map { if (it.id == event.getString("id")) it.copy(done = true, error = event.optBoolean("error"), detail = event.optString("text")) else it }) }
+            "text", "attachment", "step", "step_result" -> if (event.optString("taskId") == activeTask) changeTurn { it.event(event) }
             "result" -> if (event.optString("taskId") == activeTask) changeTurn { it.copy(answer = event.getString("text"), status = "done") } else notice = "自检通过"
-            "error", "cancelled" -> {
+            "error", "cancelled", "interrupted" -> {
                 val message = event.optString("message", "任务已停止")
-                if (activeTask.isNotEmpty()) changeTurn { it.copy(status = if (event.getString("type") == "cancelled") "stopped" else "error", answer = if (it.answer.isBlank()) message else "${it.answer}\n\n$message") }
+                if (activeTask.isNotEmpty()) changeTurn { it.event(event) }
                 else notice = message
             }
             "idle" -> { activeTask = ""; permission = ""; authPrompt = null; authEvent = null }
@@ -203,7 +229,7 @@ class PhoneBotModel(application: Application) : AndroidViewModel(application) {
             delay(200)
             val value = JSONArray(sessions.map { session -> JSONObject().put("id", session.id).put("title", session.title).put("updated", session.updated)
                 .put("turns", JSONArray(session.turns.map { turn -> JSONObject().put("id", turn.id).put("prompt", turn.prompt).put("answer", turn.answer).put("status", turn.status).put("image", turn.image)
-                    .put("steps", JSONArray(turn.steps.map { step -> JSONObject().put("id", step.id).put("name", step.name).put("args", step.args).put("detail", step.detail).put("error", step.error) })) })) }).toString()
+                    .put("steps", JSONArray(turn.steps.map { step -> JSONObject().put("id", step.id).put("name", step.name).put("args", step.args).put("detail", step.detail).put("done", step.done).put("error", step.error) })) })) }).toString()
             try {
                 withContext(Dispatchers.IO) {
                     historyMutex.withLock {

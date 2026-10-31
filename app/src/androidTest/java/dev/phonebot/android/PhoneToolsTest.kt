@@ -12,6 +12,8 @@ import android.app.UiAutomation
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import dev.phonebot.android.engine.CredentialVault
+import dev.phonebot.android.engine.TaskJournal
+import android.graphics.BitmapFactory
 import java.io.File
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
@@ -71,19 +73,46 @@ class PhoneToolsTest {
             val activity = instrumentation.startActivitySync(Intent().setComponent(ComponentName(context.packageName, "dev.phonebot.android.testing.PhoneTestActivity")).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
             SystemClock.sleep(2000)
             var screen = call("screen_read")
-            val input = screen.getJSONArray("elements").objects().first { it.optBoolean("editable") }.getString("id")
+            val input = checkNotNull(screen.getJSONArray("elements").objects().firstOrNull { it.optBoolean("editable") }) { "输入框缺失：$screen" }.getString("id")
             val typed = call("input_text", JSONObject().put("element", input).put("text", "你好，PhoneBot"))
             assertTrue(typed.getBoolean("inputVerified"))
-            assertTrue(typed.getJSONArray("elements").objects().any { it.optString("text") == "你好，PhoneBot" })
-            assertTrue(call("tap", JSONObject().put("element", input), false).getString("error").contains("过期"))
+            assertEquals("diff", typed.getString("kind"))
+            assertTrue(typed.getJSONArray("updated").objects().any { it.optString("text") == "你好，PhoneBot" && it.optString("id") == input })
+            call("tap", JSONObject().put("element", input))
             screen = call("tap", JSONObject().put("text", "确认点击"))
+            screen = call("screen_read")
             assertTrue(screen.getJSONArray("elements").objects().any { it.optString("text") == "点击成功" })
             val image = call("screen_read", JSONObject().put("ocr", true).put("image", true))
             assertTrue(File(image.getString("image")).length() > 1000)
+            val info = image.getJSONObject("imageInfo")
+            assertEquals("image/jpeg", info.getString("mimeType"))
+            assertTrue(maxOf(info.getInt("width"), info.getInt("height")) <= 1280)
+            val bitmap = BitmapFactory.decodeFile(image.getString("image"))
+            assertEquals(info.getInt("width"), bitmap.width)
+            assertEquals(image.getInt("width").toDouble(), bitmap.width * info.getDouble("screenPerImageX"), 0.01)
+            bitmap.recycle()
             val ocr = image.getJSONArray("ocr").objects().joinToString { it.getString("text") }
             assertTrue(ocr, ocr.contains("OCR") && (ocr.contains("识别") || ocr.contains("屏幕")))
             assertTrue(call("app_list").getJSONArray("apps").objects().any { it.getString("package") == context.packageName })
             call("tap", JSONObject().put("x", -1).put("y", 1), false)
+            call("tap", JSONObject().put("text", "重复目标"), false)
+            val batch = call("do_steps", JSONObject("""{"steps":[{"tool":"input_text","args":{"resourceId":"android:id/edit","text":"连续中文"},"expect":{"text":"连续中文"}},{"tool":"tap","args":{"text":"确认点击"},"expect":{"text":"点击成功"}}]}"""))
+            assertTrue(batch.toString(), batch.getBoolean("ok"))
+            assertEquals(2, batch.getJSONArray("steps").length())
+            val stopped = call("do_steps", JSONObject("""{"steps":[{"tool":"tap","args":{"text":"不存在的按钮"}},{"tool":"input_text","args":{"resourceId":"android:id/edit","text":"不应执行"}}]}"""))
+            assertFalse(stopped.getBoolean("ok"))
+            assertEquals(1, stopped.getInt("remaining"))
+            assertFalse(call("screen_read").getJSONArray("elements").objects().any { it.optString("text") == "不应执行" })
+            val dialog = call("do_steps", JSONObject("""{"steps":[{"tool":"tap","args":{"text":"显示弹窗"}},{"tool":"home","args":{}}]}"""))
+            assertFalse(dialog.getBoolean("ok"))
+            assertEquals(1, dialog.getInt("remaining"))
+            call("back")
+            instrumentation.runOnMainSync { activity.getSystemService(android.view.inputmethod.InputMethodManager::class.java).hideSoftInputFromWindow(activity.window.decorView.windowToken, 0) }
+            SystemClock.sleep(400)
+            screen = call("screen_read")
+            val bottom = checkNotNull(screen.getJSONArray("elements").objects().firstOrNull { it.optString("text") == "底部按钮" }) { "底部按钮缺失：$screen" }.getJSONArray("bounds")
+            call("tap", JSONObject().put("x", (bottom.getInt(0) + bottom.getInt(2)) / 2).put("y", (bottom.getInt(1) + bottom.getInt(3)) / 2))
+            assertTrue(call("screen_read").getJSONArray("elements").objects().any { it.optString("text") == "底部点击成功" })
             val height = screen.getInt("height"); val width = screen.getInt("width")
             call("swipe", JSONObject().put("x", width / 2).put("y", height * 3 / 4).put("endX", width / 2).put("endY", height / 2))
             call("home")
@@ -93,5 +122,32 @@ class PhoneToolsTest {
             shell("settings put secure enabled_accessibility_services '$originalServices'")
             if (originalServices.isEmpty()) shell("settings put secure accessibility_enabled 0")
         }
+    }
+
+    @Test fun taskJournalPreservesFailureRecoveryAndRedactsCredentials() {
+        val directory = File(context.cacheDir, "journal-test").apply { mkdirs() }
+        val journal = TaskJournal(directory)
+        try {
+            val secret = "key-with-\"quotes\\and中文"
+            journal.remember(secret)
+            journal.append(JSONObject().put("type", "task_open").put("taskId", "test-task").put("session", "test-session").put("prompt", "test"))
+            journal.append(JSONObject().put("type", "step").put("taskId", "test-task").put("apiKey", "unknown-key").put("text", "echo $secret"))
+            val file = File(directory, "test-task.jsonl")
+            file.appendText("{\"type\":")
+            journal.recover()
+            val records = journal.records(file)
+            assertEquals(3, records.size)
+            assertEquals("interrupted", records.last().getString("type"))
+            assertFalse(file.readText().contains("unknown-key"))
+            assertEquals("echo [redacted]", records[1].getString("text"))
+            journal.recover()
+            assertEquals(3, journal.records(file).size)
+            for (type in listOf("error", "cancelled", "result")) {
+                journal.append(JSONObject().put("type", "task_open").put("taskId", "test-$type"))
+                journal.append(JSONObject().put("type", type).put("taskId", "test-$type"))
+            }
+            journal.recover()
+            for (type in listOf("error", "cancelled", "result")) assertEquals(type, journal.records(File(directory, "test-$type.jsonl")).last().getString("type"))
+        } finally { directory.deleteRecursively() }
     }
 }

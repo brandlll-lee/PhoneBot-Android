@@ -17,6 +17,7 @@ import android.os.Messenger
 import android.os.ParcelFileDescriptor
 import android.os.Process
 import android.os.RemoteException
+import android.os.SystemClock
 import dev.phonebot.android.MainActivity
 import java.io.File
 import java.io.OutputStream
@@ -38,13 +39,14 @@ class EngineService : Service() {
     private val clients = mutableSetOf<Messenger>()
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private val vault by lazy { CredentialVault(this) }
+    private val journal by lazy { TaskJournal(File(filesDir, "task-events")) }
     private var toolJob: Job? = null
     private var pausedTool: JSONObject? = null
     private var authPrompt: String? = null
     private var taskId = ""
     private var cancelled = false
-    private var taskStart: JSONObject? = null
-    private val taskEvents = mutableListOf<JSONObject>()
+    @Volatile private var taskStart: JSONObject? = null
+    @Volatile private var taskEnded = false
     private var promptEvent: JSONObject? = null
     private var loginEvent: JSONObject? = null
     private var writer: OutputStream? = null
@@ -57,8 +59,7 @@ class EngineService : Service() {
             EngineIpc.CONNECT -> {
                 clients.add(message.replyTo); publish(state)
                 try {
-                    taskStart?.let { message.replyTo.send(eventMessage(it)) }
-                    taskEvents.forEach { message.replyTo.send(eventMessage(it)) }
+                    taskStart?.let { start -> journal.records(File(filesDir, "task-events/${start.getString("taskId")}.jsonl")).forEach { message.replyTo.send(eventMessage(it)) } }
                     loginEvent?.let { message.replyTo.send(eventMessage(it)) }
                     promptEvent?.let { message.replyTo.send(eventMessage(it)) }
                 } catch (_: RemoteException) { clients.remove(message.replyTo) }
@@ -70,6 +71,11 @@ class EngineService : Service() {
     })
 
     override fun onBind(intent: Intent): IBinder = messenger.binder
+
+    override fun onCreate() {
+        super.onCreate()
+        journal.recover()
+    }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         if (intent?.action == EngineIpc.STOP) { stopEngine(); return START_NOT_STICKY }
@@ -117,7 +123,10 @@ class EngineService : Service() {
                         lines.forEach { line ->
                             require(line.length <= 65536) { "Engine event exceeds 64 KiB" }
                             val event = JSONObject(line)
-                            handler.post { handleEvent(event) }
+                            val recorded = event.optString("type") != "tool" && taskStart?.optString("taskId") == event.optString("taskId")
+                            val safe = if (recorded) journal.append(event) else event
+                            if (recorded && event.optString("type") in setOf("result", "error", "cancelled", "interrupted")) taskEnded = true
+                            handler.post { handleEvent(safe, recorded) }
                         }
                     }
                     handler.post { if (!closing) fail("Engine output closed") }
@@ -146,6 +155,7 @@ class EngineService : Service() {
                 check(command.optString("id") == authPrompt) { "认证步骤已结束" }
                 authPrompt = null
                 promptEvent = null
+                journal.remember(command.opt("result"))
                 write(command.put("secret", true))
                 return
             }
@@ -156,14 +166,16 @@ class EngineService : Service() {
             command.put("taskId", taskId)
             if (command.getString("type") == "task") {
                 taskStart = JSONObject(command.toString()).put("type", "task_open")
-                taskEvents.clear()
+                taskEnded = false
+                journal.append(checkNotNull(taskStart))
+                PhoneAccessibilityService.instance?.beginTask()
             }
             publish(state.copy(phase = EnginePhase.RUNNING, detail = ""))
             write(command)
         } catch (error: Exception) { publish(state.copy(detail = error.message ?: "Command failed")) }
     }
 
-    private fun handleEvent(event: JSONObject) {
+    private fun handleEvent(event: JSONObject, recorded: Boolean = false) {
         val type = event.getString("type")
         if (closing && type != "stopped") return
         when (type) {
@@ -172,11 +184,11 @@ class EngineService : Service() {
                 publish(EngineState(EnginePhase.READY, "Node ${event.getString("node")} / Pi ${event.getString("pi")}", Process.myPid()))
             }
             "tool" -> executeTool(event)
-            "result" -> { publish(state.copy(detail = event.toString())); emit(event) }
-            "error" -> { publish(state.copy(detail = "Error: ${event.getString("message")}")); emit(event) }
-            "idle" -> { toolJob?.cancel(); pausedTool = null; authPrompt = null; promptEvent = null; loginEvent = null; publish(state.copy(phase = EnginePhase.READY)); emit(event) }
+            "result" -> { publish(state.copy(detail = event.toString())); emit(event, !recorded) }
+            "error" -> { publish(state.copy(detail = "Error: ${event.getString("message")}")); emit(event, !recorded) }
+            "idle" -> { toolJob?.cancel(); pausedTool = null; authPrompt = null; promptEvent = null; loginEvent = null; publish(state.copy(phase = EnginePhase.READY)); emit(event, !recorded) }
             "stopped" -> finish(EngineState(EnginePhase.STOPPED))
-            else -> emit(event)
+            else -> emit(event, !recorded)
         }
     }
 
@@ -195,16 +207,20 @@ class EngineService : Service() {
             return
         }
         toolJob = scope.launch {
+            val began = SystemClock.elapsedRealtime()
             val reply = JSONObject().put("type", "tool_result").put("id", id)
             try {
-                val result: Any? = withTimeout(30000) {
+                val result: Any? = withTimeout(if (name == "do_steps") 90000 else 30000) {
                     when (name) {
                         "runtime_info" -> JSONObject().put("platform", "android").put("sdk", Build.VERSION.SDK_INT).put("pid", Process.myPid()).put("manufacturer", Build.MANUFACTURER)
-                        "vault_read" -> withContext(Dispatchers.IO) { vault.read(params.getString("provider")) }
+                        "vault_read" -> withContext(Dispatchers.IO) { vault.read(params.getString("provider")).also { journal.remember(it) } }
                         "vault_list" -> withContext(Dispatchers.IO) { vault.list() }
-                        "vault_write" -> withContext(Dispatchers.IO) { vault.write(params.getString("provider"), params.getJSONObject("credential")); true }
+                        "vault_write" -> withContext(Dispatchers.IO) { journal.remember(params.getJSONObject("credential")); vault.write(params.getString("provider"), params.getJSONObject("credential")); true }
                         "vault_delete" -> withContext(Dispatchers.IO) { vault.delete(params.getString("provider")); true }
-                        else -> checkNotNull(phone).execute(name, params)
+                        else -> checkNotNull(phone).execute(name, params) { substep ->
+                            substep.put("taskId", taskId).put("id", "$id:${substep.getString("id")}")
+                            emit(substep)
+                        }
                     }
                 }
                 check(!cancelled) { "任务已停止" }
@@ -212,19 +228,17 @@ class EngineService : Service() {
             } catch (error: CancellationException) {
                 reply.put("error", if (cancelled) "任务已停止" else "工具执行超时")
             } catch (error: Exception) { reply.put("error", error.message ?: "工具执行失败") }
+            if (!internal && taskStart?.optString("taskId") == taskId) journal.append(JSONObject().put("type", "host_result").put("taskId", taskId)
+                .put("id", id).put("name", name).put("result", reply.opt("result")).put("error", reply.opt("error")).put("durationMs", SystemClock.elapsedRealtime() - began))
             if (!closing) write(reply)
         }
     }
 
-    private fun emit(event: JSONObject) {
+    private fun emit(event: JSONObject, persist: Boolean = true) {
+        val safe = if (persist && taskStart != null && event.optString("taskId") == taskStart?.optString("taskId")) journal.append(event) else journal.clean(event)
         if (event.optString("type") == "auth_event") loginEvent = event
-        if (taskStart != null && event.optString("taskId") == taskStart?.optString("taskId")) {
-            val last = taskEvents.lastOrNull()
-            if (event.optString("type") == "text" && last?.optString("type") == "text" && last.optString("delta").length < 12000)
-                last.put("delta", last.getString("delta") + event.getString("delta"))
-            else taskEvents.add(JSONObject(event.toString()))
-        }
-        sendToClients { eventMessage(event) }
+        if (taskStart != null && event.optString("taskId") == taskStart?.optString("taskId") && event.optString("type") in setOf("result", "error", "cancelled", "interrupted")) taskEnded = true
+        sendToClients { eventMessage(safe) }
     }
 
     private fun eventMessage(event: JSONObject) = Message.obtain(null, EngineIpc.EVENT).apply { data = Bundle().apply { putString("json", event.toString()) } }
@@ -244,6 +258,7 @@ class EngineService : Service() {
 
     private fun stopEngine() {
         if (closing) return
+        if (taskStart?.optString("taskId") == taskId && !taskEnded) emit(JSONObject().put("type", "cancelled").put("taskId", taskId).put("message", "引擎已停止"))
         closing = true
         cancelled = true
         pausedTool = null
@@ -259,6 +274,9 @@ class EngineService : Service() {
     }
 
     private fun finish(result: EngineState) {
+        taskStart?.takeIf { it.optString("taskId") == taskId && !taskEnded }?.let {
+            emit(JSONObject().put("type", "interrupted").put("taskId", it.getString("taskId")).put("message", result.detail.ifEmpty { "引擎已停止" }))
+        }
         closing = true
         handler.removeCallbacksAndMessages(null)
         publish(result)
