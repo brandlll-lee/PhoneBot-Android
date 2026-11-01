@@ -25,7 +25,7 @@ internal class PhoneShell(private val context: Context, private val onChange: ()
     private var shizukuService: ISystemShell? = null
     private var shizukuConnection: ServiceConnection? = null
     private val args = Shizuku.UserServiceArgs(ComponentName(context.packageName, SystemShellService::class.java.name))
-        .daemon(false).processNameSuffix("shell").version(2)
+        .daemon(false).processNameSuffix("shell").version(3)
     private val received = Shizuku.OnBinderReceivedListener { onChange() }
     private val died = Shizuku.OnBinderDeadListener { shizukuService = null; onChange() }
     private val granted = Shizuku.OnRequestPermissionResultListener { _, _ -> onChange() }
@@ -85,11 +85,12 @@ internal class PhoneShell(private val context: Context, private val onChange: ()
         if (backend == "shizuku" && !ready(backend)) return JSONObject().put("ok", false).put("error", status(backend)).put("permission", backend)
             .put("message", "请启动 Shizuku，并在 PhoneBot 权限页授权系统命令")
         val service = service(backend)
+        val requestId = java.util.UUID.randomUUID().toString()
         return suspendCancellableCoroutine { continuation ->
-            continuation.invokeOnCancellation { Thread({ runCatching { service.cancel() } }, "shell-cancel").start() }
+            continuation.invokeOnCancellation { Thread({ runCatching { service.cancel(requestId) } }, "shell-cancel").start() }
             Thread({
                 try {
-                    val result = JSONObject(service.execute(command))
+                    val result = JSONObject(service.execute(requestId, command))
                     if (continuation.isActive) continuation.resume(result)
                 } catch (error: Exception) { if (continuation.isActive) continuation.resumeWithException(error) }
             }, "shell-request").start()

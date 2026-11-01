@@ -27,6 +27,7 @@ class ThemeTest {
     @Test fun chatRendersBothPalettesAndFollowsSystem() {
         val mode = mutableStateOf(Appearance.DARK)
         val night = mutableStateOf(false)
+        val draft = mutableStateOf("")
         compose.setContent {
             val configuration = Configuration(LocalConfiguration.current).apply {
                 uiMode = (uiMode and Configuration.UI_MODE_NIGHT_MASK.inv()) or
@@ -38,7 +39,7 @@ class ThemeTest {
                         Column {
                             ChatHeader(true, {}, {}, {}, {})
                             ChatMessages(listOf(ChatTurn("theme", "打开相册", answer = "**已打开相册。**\n\n```kotlin\nval ready = true\n```", status = "done")), "", Modifier.weight(1f))
-                            TaskComposer("我的模型", emptyList(), false, true, {}, {}, {}, { true }, {})
+                            TaskComposer(draft.value, { draft.value = it }, false, true, { true }, {})
                         }
                     }
                 }
@@ -48,7 +49,7 @@ class ThemeTest {
         for (appearance in listOf(Appearance.DARK, Appearance.LIGHT)) {
             compose.runOnIdle { mode.value = appearance }
             compose.waitUntil(5000) { compose.onAllNodes(hasText("已打开相册。")).fetchSemanticsNodes().isNotEmpty() }
-            compose.onNodeWithText("My phonebot").assertIsDisplayed()
+            compose.onNodeWithText("PhoneBot").assertIsDisplayed()
             compose.onNodeWithContentDescription("更多选项").performClick()
             compose.onNodeWithText("设置").assertIsDisplayed()
             compose.onNodeWithText("设置").performClick()

@@ -13,6 +13,7 @@ import android.os.PowerManager
 import android.os.SystemClock
 import android.view.Display
 import android.view.accessibility.AccessibilityEvent
+import androidx.core.util.size
 import com.google.mlkit.vision.common.InputImage
 import com.google.mlkit.vision.text.TextRecognition
 import com.google.mlkit.vision.text.chinese.ChineseTextRecognizerOptions
@@ -22,6 +23,7 @@ import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeout
 import kotlin.coroutines.coroutineContext
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
@@ -40,11 +42,9 @@ class PhoneAccessibilityService : AccessibilityService() {
     }
     private val chineseHolder = lazy { TextRecognition.getClient(ChineseTextRecognizerOptions.Builder().build()) }
     private val latinHolder = lazy { TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS) }
-    private val screen = ScreenState(this)
-    private val actions = PhoneActions(this, screen)
-    internal var target: PhoneDisplay? = null; private set
     internal var overlay: TaskOverlay? = null; private set
-    internal var lastScreenEvent = 0L; private set
+    private val screenEvents = mutableMapOf<Int, Long>()
+    internal fun lastScreenEvent(displayId: Int) = screenEvents[displayId] ?: 0L
 
     override fun onServiceConnected() {
         instance = this
@@ -53,9 +53,12 @@ class PhoneAccessibilityService : AccessibilityService() {
         if (Build.VERSION.SDK_INT >= 33) serviceInfo = serviceInfo.apply { flags = flags or AccessibilityServiceInfo.FLAG_INPUT_METHOD_EDITOR }
     }
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
-        val id = target?.displayId ?: Display.DEFAULT_DISPLAY
-        val windows = if (Build.VERSION.SDK_INT >= 30) windowsOnAllDisplays.get(id).orEmpty() else windows
-        if (event == null || windows.any { it.id == event.windowId && it.type != android.view.accessibility.AccessibilityWindowInfo.TYPE_ACCESSIBILITY_OVERLAY }) lastScreenEvent = SystemClock.uptimeMillis()
+        if (event == null) return
+        val displays = if (Build.VERSION.SDK_INT >= 30) windowsOnAllDisplays else android.util.SparseArray<List<android.view.accessibility.AccessibilityWindowInfo>>().apply { put(Display.DEFAULT_DISPLAY, windows) }
+        for (i in 0 until displays.size) {
+            if (displays.valueAt(i).any { it.id == event.windowId && it.type != android.view.accessibility.AccessibilityWindowInfo.TYPE_ACCESSIBILITY_OVERLAY })
+                screenEvents[displays.keyAt(i)] = SystemClock.uptimeMillis()
+        }
     }
     override fun onInterrupt() = Unit
     override fun onConfigurationChanged(newConfig: android.content.res.Configuration) {
@@ -70,12 +73,7 @@ class PhoneAccessibilityService : AccessibilityService() {
         super.onDestroy()
     }
 
-    fun beginTask(id: String) { if (screen.taskId != id) { screen.reset(); screen.taskId = id } }
-    internal fun bind(display: PhoneDisplay) {
-        target = display
-        if (screen.displayId != display.displayId) { screen.reset(); screen.displayId = display.displayId }
-    }
-    fun available(): Boolean = if (target?.virtual == true) target?.alive() == true else
+    internal fun available(target: PhoneDisplay): Boolean = if (target.virtual) target.alive() else
         !getSystemService(KeyguardManager::class.java).isKeyguardLocked && getSystemService(PowerManager::class.java).isInteractive
 
     internal suspend fun gesture(path: Path, duration: Long) {
@@ -92,8 +90,8 @@ class PhoneAccessibilityService : AccessibilityService() {
         if (!accepted && continuation.isActive) continuation.resumeWithException(IllegalStateException("系统拒绝执行手势"))
     }
 
-    private suspend fun capture(): Bitmap {
-        if (target?.virtual == true) return checkNotNull(target).frame()
+    private suspend fun capture(target: PhoneDisplay): Bitmap {
+        if (target.virtual) return target.frame()
         val preview = overlay
         return if (preview != null) preview.hiddenWhile { captureMain() } else captureMain()
     }
@@ -115,11 +113,11 @@ class PhoneAccessibilityService : AccessibilityService() {
         }
     }
 
-    private suspend fun read(ocr: Boolean, image: Boolean): JSONObject {
+    internal suspend fun read(screen: ScreenState, target: PhoneDisplay, ocr: Boolean, image: Boolean): JSONObject {
         screen.scan()
         if (!ocr && !image) return screen.present(true)
         val geometry = screen.geometry
-        val bitmap = capture()
+        val bitmap = capture(target)
         try {
             screen.scan()
             check(screen.geometry.rotation == geometry.rotation && screen.geometry.width == geometry.width && screen.geometry.height == geometry.height) { "屏幕方向已变化，请重新读屏" }
@@ -164,12 +162,21 @@ class PhoneAccessibilityService : AccessibilityService() {
         } finally { bitmap.recycle() }
     }
 
+}
+
+internal class PhoneExecution(private val service: PhoneAccessibilityService, val target: PhoneDisplay, id: String) {
+    private val screen = ScreenState(service).apply { taskId = id }
+    private val actions = PhoneActions(service, screen, target)
+
     suspend fun execute(name: String, params: JSONObject, report: (JSONObject) -> Unit = {}): JSONObject {
         coroutineContext.ensureActive()
-        if (name == "app_list") return listApps(this)
-        check(available()) { if (target?.virtual == true) "虚拟屏连接已断开" else "请亮屏并解锁手机" }
-        if (name == "screen_read") return read(params.optBoolean("ocr"), params.optBoolean("image"))
-        if (name == "screenshot") return read(false, true)
+        if (name == "app_list") return PhoneAccessibilityService.listApps(service)
+        check(service.available(target)) { if (target.virtual) "虚拟屏连接已断开" else "请亮屏并解锁手机" }
+        if (screen.displayId != target.displayId) { screen.reset(); screen.displayId = target.displayId }
+        screen.scan()
+        if (name !in setOf("app_launch", "app_send_intent", "phone_open_link")) target.observePackage(screen.latest.optString("package"))
+        if (name == "screen_read") return withTimeout(30000) { service.read(screen, target, params.optBoolean("ocr"), params.optBoolean("image")) }
+        if (name == "screenshot") return withTimeout(30000) { service.read(screen, target, false, true) }
         return actions.execute(name, params, report)
     }
 }

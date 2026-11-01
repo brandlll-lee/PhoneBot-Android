@@ -29,8 +29,8 @@ import org.json.JSONObject
 data class TaskStep(val id: String, val name: String, val args: String = "", val detail: String = "", val done: Boolean = false, val error: Boolean = false,
     val kind: String = "tool", val request: Int = 0)
 data class ChatTurn(val id: String, val prompt: String, val answer: String = "", val steps: List<TaskStep> = emptyList(), val status: String = "running", val image: String = "", val streamText: String = "")
-data class ChatSession(val id: String = UUID.randomUUID().toString(), val title: String = "新对话", val updated: Long = System.currentTimeMillis(), val turns: List<ChatTurn> = emptyList(),
-    val helper: String = "shizuku", val screen: String = "main")
+data class ChatSession(val id: String = UUID.randomUUID().toString(), val title: String = "新 Bot", val updated: Long = System.currentTimeMillis(), val turns: List<ChatTurn> = emptyList(),
+    val helper: String = "shizuku", val screen: String = "main", val provider: String = "", val model: String = "", val avatarColor: Long = 0xFF3985FF)
 data class PiProvider(val id: String, val name: String, val count: Int, val configured: Boolean, val auth: List<Pair<String, String>>, val ambient: Boolean)
 data class PiModel(val id: String, val name: String, val image: Boolean)
 
@@ -80,15 +80,16 @@ class PhoneBotModel(application: Application) : AndroidViewModel(application) {
     var selectedSession by mutableStateOf(""); private set
     var focusedTask by mutableStateOf(""); private set
     private var requestedSession = ""
-    var provider by mutableStateOf(preferences.getString("provider", "").orEmpty()); private set
-    var model by mutableStateOf(preferences.getString("model", "").orEmpty()); private set
+    val provider get() = session?.provider.orEmpty()
+    val model get() = session?.model.orEmpty()
     var providers by mutableStateOf(listOf<PiProvider>()); private set
     var models by mutableStateOf(listOf<PiModel>()); private set
     var modelProvider by mutableStateOf(""); private set
     var modelTotal by mutableIntStateOf(0); private set
-    var activeTask by mutableStateOf(""); private set
-    var permission by mutableStateOf(""); private set
-    var permissionMessage by mutableStateOf(""); private set
+    val activeTask get() = session?.turns?.lastOrNull { it.status == "running" }?.id.orEmpty()
+    private val taskPermissions = mutableStateMapOf<String, JSONObject>()
+    val permission get() = taskPermissions[activeTask]?.optString("permission").orEmpty()
+    val permissionMessage get() = taskPermissions[activeTask]?.optString("message").orEmpty()
     var permissions by mutableStateOf(PhonePermissions.check(application)); private set
     var authPrompt by mutableStateOf<JSONObject?>(null); private set
     var authEvent by mutableStateOf<JSONObject?>(null); private set
@@ -98,6 +99,7 @@ class PhoneBotModel(application: Application) : AndroidViewModel(application) {
     var defaultScreen by mutableStateOf(preferences.getString("defaultScreen", "main").orEmpty()); private set
     private var verifiedModels by mutableStateOf(preferences.all.keys.filter { it.startsWith("verified:") }.map { it.removePrefix("verified:") }.toSet())
     private var pending: JSONObject? = null
+    private var catalogRequest = ""
     private var saveJob: Job? = null
     private val historyMutex = Mutex()
     val session get() = sessions.find { it.id == selectedSession }
@@ -113,7 +115,8 @@ class PhoneBotModel(application: Application) : AndroidViewModel(application) {
                                 turn.getJSONArray("steps").objects().map { TaskStep(it.getString("id"), it.getString("name"), it.optString("args"), it.optString("detail"), it.optBoolean("done", true), it.optBoolean("error"),
                                     it.optString("kind", "tool"), it.optInt("request")) },
                                 turn.optString("status").let { if (it == "running") "interrupted" else it }, turn.optString("image"))
-                        }, value.optString("helper", "shizuku"), value.optString("screen", "main"))
+                        }, value.optString("helper", "shizuku"), value.optString("screen", "main"),
+                            value.optString("provider", preferences.getString("provider", "").orEmpty()), value.optString("model", preferences.getString("model", "").orEmpty()), value.optLong("avatarColor", 0xFF3985FF))
                     }
                     val journal = TaskJournal(journalDirectory)
                     journalDirectory.listFiles()?.filter { it.extension == "jsonl" }?.sortedBy { it.lastModified() }?.forEach { file ->
@@ -123,7 +126,8 @@ class PhoneBotModel(application: Application) : AndroidViewModel(application) {
                         var turn = ChatTurn(start.getString("taskId"), start.getString("prompt"))
                         events.forEach { turn = turn.event(it) }
                         if (turn.status == "running") turn = turn.copy(status = "interrupted")
-                        val session = restored.find { it.id == id } ?: ChatSession(id, turn.prompt.take(30), start.optLong("time"), helper = start.optString("helper", "shizuku"), screen = start.optString("screen", "main"))
+                        val session = restored.find { it.id == id } ?: ChatSession(id, start.optString("botName", "PhoneBot"), start.optLong("time"), helper = start.optString("helper", "shizuku"), screen = start.optString("screen", "main"),
+                            provider = start.optString("provider"), model = start.optString("model"), avatarColor = start.optLong("avatarColor", 0xFF3985FF))
                         restored = restored.filterNot { it.id == id } + session.copy(turns = session.turns.filterNot { it.id == turn.id } + turn)
                     }
                     restored.sortedByDescending { it.updated }
@@ -131,7 +135,7 @@ class PhoneBotModel(application: Application) : AndroidViewModel(application) {
                 sessions = loaded
                 selectedSession = loaded.firstOrNull()?.id.orEmpty()
                 if (requestedSession.isNotEmpty()) openTask(requestedSession, focusedTask)
-            } catch (_: Exception) { notice = "会话记录读取失败" }
+            } catch (_: Exception) { notice = "聊天记录读取失败" }
             if (sessions.isEmpty()) newSession()
             engine.start()
         }
@@ -140,23 +144,23 @@ class PhoneBotModel(application: Application) : AndroidViewModel(application) {
             engine.state.collect { state ->
                 if (state.canRun) pending?.let { pending = null; engine.command(it) }
                 if (state.phase == EnginePhase.FAILED || state.phase == EnginePhase.STOPPED) {
-                    if (activeTask.isNotEmpty()) changeTurn { it.event(JSONObject().put("type", "interrupted").put("message", "引擎已停止")) }
-                    activeTask = ""; permission = ""; permissionMessage = ""; authPrompt = null; authEvent = null
+                    sessions = sessions.map { bot -> bot.copy(turns = bot.turns.map { if (it.status == "running") it.event(JSONObject().put("type", "interrupted").put("message", "引擎已停止")) else it }) }
+                    taskPermissions.clear(); authPrompt = null; authEvent = null
+                    save()
                 }
             }
         }
     }
     fun refreshPermissions() { permissions = PhonePermissions.check(getApplication()) }
     fun newSession() {
-        if (activeTask.isNotEmpty()) return
         focusedTask = ""; requestedSession = ""
-        val next = ChatSession(helper = defaultHelper, screen = defaultScreen)
-        sessions = listOf(next) + sessions.filter { it.turns.isNotEmpty() }
+        val next = ChatSession(title = "新 Bot", helper = defaultHelper, screen = defaultScreen)
+        sessions = listOf(next) + sessions
         selectedSession = next.id
         selectPhone()
         save()
     }
-    fun selectSession(id: String) { if (activeTask.isEmpty()) { selectedSession = id; focusedTask = ""; requestedSession = ""; selectPhone() } }
+    fun selectSession(id: String) { selectedSession = id; focusedTask = ""; requestedSession = ""; selectPhone() }
     private fun selectPhone() {
         val current = session ?: return
         if (engine.state.value.canRun) engine.command(JSONObject().put("type", "phone_select").put("session", current.id).put("helper", current.helper).put("screen", current.screen))
@@ -179,7 +183,7 @@ class PhoneBotModel(application: Application) : AndroidViewModel(application) {
         if (activeTask.isNotEmpty()) return
         defaultHelper = current.helper; defaultScreen = current.screen
         preferences.edit { putString("defaultHelper", defaultHelper); putString("defaultScreen", defaultScreen) }
-        notice = "新会话将使用当前配置"
+        notice = "新 Bot 将使用当前配置"
     }
     fun helperCommand(action: String, helper: String = session?.helper ?: defaultHelper, port: Int = 0, code: String = "", enabled: Boolean = false) {
         if (activeTask.isNotEmpty() && action in setOf("forget", "recovery")) return
@@ -190,11 +194,11 @@ class PhoneBotModel(application: Application) : AndroidViewModel(application) {
         focusedTask = task
         if (sessions.any { it.id == session && it.turns.any { turn -> turn.id == task } }) {
             selectedSession = session
-            if (activeTask.isEmpty()) selectPhone()
+            selectPhone()
         }
     }
     fun deleteSession(id: String) {
-        if (activeTask.isNotEmpty()) return
+        if (sessions.find { it.id == id }?.turns?.any { it.status == "running" } == true) return
         sessions = sessions.filter { it.id != id }
         if (selectedSession == id) selectedSession = sessions.firstOrNull()?.id.orEmpty()
         if (sessions.isEmpty()) newSession() else save()
@@ -208,40 +212,55 @@ class PhoneBotModel(application: Application) : AndroidViewModel(application) {
         }
     }
     fun choose(providerId: String, modelId: String) {
-        provider = providerId; model = modelId
-        preferences.edit { putString("provider", provider); putString("model", model) }
+        if (activeTask.isNotEmpty()) return
+        sessions = sessions.map { if (it.id == selectedSession) it.copy(provider = providerId, model = modelId) else it }
+        save()
+    }
+    fun editBot(name: String = session?.title.orEmpty(), color: Long = session?.avatarColor ?: 0xFF3985FF) {
+        if (activeTask.isNotEmpty() || name.isBlank()) return
+        sessions = sessions.map { if (it.id == selectedSession) it.copy(title = name.trim(), avatarColor = color) else it }
+        save()
     }
     fun verified(providerId: String, modelId: String = model): Boolean = "$providerId:$modelId" in verifiedModels
     fun catalog(providerId: String = "", offset: Int = 0, query: String = "") {
         if (offset == 0) { models = emptyList(); modelProvider = providerId }
-        command(JSONObject().put("type", "catalog").put("provider", providerId).put("offset", offset).put("query", query))
+        catalogRequest = UUID.randomUUID().toString()
+        command(JSONObject().put("type", "catalog").put("taskId", catalogRequest).put("provider", providerId).put("offset", offset).put("query", query))
     }
     fun login(id: String, auth: String) {
         authEvent = null
         command(JSONObject().put("type", "login").put("provider", id).put("auth", auth).put("deviceId", deviceId))
     }
     fun logout(id: String) = command(JSONObject().put("type", "logout").put("provider", id))
-    fun refresh(id: String) = command(JSONObject().put("type", "refresh").put("provider", id))
+    fun refresh(id: String) {
+        catalogRequest = UUID.randomUUID().toString()
+        command(JSONObject().put("type", "refresh").put("taskId", catalogRequest).put("provider", id))
+    }
     fun verify() = command(JSONObject().put("type", "verify").put("provider", provider).put("model", model))
     fun answerAuth(answer: String) {
         val prompt = authPrompt ?: return
-        engine.command(JSONObject().put("type", "tool_result").put("id", prompt.getString("id")).put("result", answer))
+        engine.command(JSONObject().put("type", "tool_result").put("taskId", prompt.optString("taskId")).put("id", prompt.getString("id")).put("result", answer))
         authPrompt = null
     }
-    fun cancel() { permission = ""; permissionMessage = ""; authPrompt = null; authEvent = null; pending = null; engine.cancel() }
-    fun resume() { permission = ""; permissionMessage = ""; engine.command(JSONObject().put("type", "resume")) }
+    fun cancel() { taskPermissions.remove(activeTask); engine.cancel(activeTask) }
+    fun cancelAuth() {
+        val taskId = authPrompt?.optString("taskId")?.ifEmpty { null } ?: authEvent?.optString("taskId").orEmpty()
+        engine.cancel(taskId)
+        authPrompt = null; authEvent = null
+    }
+    fun resume() { taskPermissions.remove(activeTask); engine.command(JSONObject().put("type", "resume").put("taskId", activeTask)) }
     fun submit(prompt: String): Boolean {
         if (prompt.isBlank() || activeTask.isNotEmpty()) return false
         if (provider.isEmpty() || model.isEmpty()) { notice = "请先选择服务商和模型"; return false }
         if (!engine.state.value.canRun) { notice = "请等待引擎就绪"; return false }
         if (session == null) newSession()
         focusedTask = ""; requestedSession = ""
-        activeTask = UUID.randomUUID().toString()
-        sessions = sessions.map { if (it.id == selectedSession) it.copy(title = if (it.turns.isEmpty()) prompt.take(30) else it.title,
-            updated = System.currentTimeMillis(), turns = it.turns + ChatTurn(activeTask, prompt)) else it }.sortedByDescending { it.updated }
+        val taskId = UUID.randomUUID().toString()
+        sessions = sessions.map { if (it.id == selectedSession) it.copy(
+            updated = System.currentTimeMillis(), turns = it.turns + ChatTurn(taskId, prompt)) else it }.sortedByDescending { it.updated }
         save()
-        engine.command(JSONObject().put("type", "task").put("taskId", activeTask).put("session", selectedSession).put("prompt", prompt).put("provider", provider).put("model", model)
-            .put("helper", session?.helper ?: defaultHelper).put("screen", session?.screen ?: defaultScreen))
+        engine.command(JSONObject().put("type", "task").put("taskId", taskId).put("session", selectedSession).put("prompt", prompt).put("provider", provider).put("model", model)
+            .put("helper", session?.helper ?: defaultHelper).put("screen", session?.screen ?: defaultScreen).put("botName", session?.title).put("avatarColor", session?.avatarColor))
         return true
     }
     private fun command(command: JSONObject) {
@@ -251,21 +270,23 @@ class PhoneBotModel(application: Application) : AndroidViewModel(application) {
         else if (command.optString("type") == "catalog" && activeTask.isEmpty()) pending = command
         else notice = "请先结束当前操作"
     }
-    private fun changeTurn(change: (ChatTurn) -> ChatTurn) {
-        sessions = sessions.map { session -> session.copy(turns = session.turns.map { if (it.id == activeTask) change(it) else it }) }
+    private fun changeTurn(taskId: String, change: (ChatTurn) -> ChatTurn) {
+        sessions = sessions.map { session -> if (session.turns.any { it.id == taskId }) session.copy(updated = System.currentTimeMillis(), turns = session.turns.map { if (it.id == taskId) change(it) else it }) else session }.sortedByDescending { it.updated }
         save()
     }
     private fun onEvent(event: JSONObject) {
         when (event.getString("type")) {
             "helper_status" -> { helperStates[event.getString("helper")] = event; refreshPermissions() }
             "task_open" -> {
-                activeTask = event.getString("taskId")
+                val taskId = event.getString("taskId")
                 val owner = event.getString("session")
-                if (requestedSession.isEmpty()) selectedSession = owner
-                if (sessions.none { it.id == owner }) sessions = listOf(ChatSession(id = owner, title = event.getString("prompt").take(30), helper = event.optString("helper", "shizuku"), screen = event.optString("screen", "main"))) + sessions
-                sessions = sessions.map { session -> if (session.id == owner) session.copy(turns = session.turns.filter { it.id != activeTask } + ChatTurn(activeTask, event.getString("prompt"))) else session }
+                if (sessions.none { it.id == owner }) sessions = listOf(ChatSession(id = owner, title = event.optString("botName", "PhoneBot"), helper = event.optString("helper", "shizuku"), screen = event.optString("screen", "main"),
+                    provider = event.optString("provider"), model = event.optString("model"), avatarColor = event.optLong("avatarColor", 0xFF3985FF))) + sessions
+                sessions = sessions.map { session -> if (session.id == owner) session.copy(turns = if (session.turns.none { it.id == taskId }) session.turns + ChatTurn(taskId, event.getString("prompt"))
+                    else session.turns.map { if (it.id == taskId) it.copy(status = "running") else it }) else session }
             }
             "catalog" -> {
+                if (event.optString("taskId") != catalogRequest) return
                 providers = event.getJSONArray("providers").objects().map { value -> PiProvider(value.getString("id"), value.getString("name"), value.getInt("count"), value.getBoolean("configured"),
                     value.getJSONArray("auth").objects().map { it.getString("id") to it.getString("name") }, value.optBoolean("ambient")) }
                 val id = event.optString("provider")
@@ -291,15 +312,16 @@ class PhoneBotModel(application: Application) : AndroidViewModel(application) {
             }
             "auth_prompt" -> authPrompt = event
             "auth_event" -> authEvent = event
-            "permission" -> { permission = event.getString("permission"); permissionMessage = event.optString("message"); refreshPermissions() }
-            "model_request", "toolcall_start", "text_delta", "thinking_delta", "model_response", "attachment", "step", "step_result" -> if (event.optString("taskId") == activeTask) changeTurn { it.event(event) }
-            "result" -> if (event.optString("taskId") == activeTask) changeTurn { it.event(event) } else notice = "自检通过"
+            "permission" -> { taskPermissions[event.getString("taskId")] = event; refreshPermissions() }
+            "waiting" -> changeTurn(event.optString("taskId")) { it.copy(steps = it.steps.filterNot { step -> step.id == "waiting" } + TaskStep("waiting", "", detail = event.optString("message", "等待共享资源"), kind = "status", done = true)) }
+            "model_request", "toolcall_start", "text_delta", "thinking_delta", "model_response", "attachment", "step", "step_result" -> changeTurn(event.optString("taskId")) { it.event(event) }
+            "result" -> if (sessions.any { bot -> bot.turns.any { it.id == event.optString("taskId") } }) changeTurn(event.optString("taskId")) { it.event(event) } else notice = "自检通过"
             "error", "cancelled", "interrupted" -> {
                 val message = event.optString("message", "任务已停止")
-                if (activeTask.isNotEmpty()) changeTurn { it.event(event) }
+                if (sessions.any { bot -> bot.turns.any { it.id == event.optString("taskId") } }) changeTurn(event.optString("taskId")) { it.event(event) }
                 else notice = message
             }
-            "idle" -> { activeTask = ""; permission = ""; permissionMessage = ""; authPrompt = null; authEvent = null }
+            "idle" -> taskPermissions.remove(event.optString("taskId"))
         }
     }
     fun clearNotice() { notice = "" }
@@ -308,6 +330,7 @@ class PhoneBotModel(application: Application) : AndroidViewModel(application) {
         saveJob = viewModelScope.launch {
             delay(200)
             val value = JSONArray(sessions.map { session -> JSONObject().put("id", session.id).put("title", session.title).put("updated", session.updated).put("helper", session.helper).put("screen", session.screen)
+                .put("provider", session.provider).put("model", session.model).put("avatarColor", session.avatarColor)
                 .put("turns", JSONArray(session.turns.map { turn -> JSONObject().put("id", turn.id).put("prompt", turn.prompt).put("answer", turn.answer).put("status", turn.status).put("image", turn.image)
                     .put("steps", JSONArray(turn.steps.map { step -> JSONObject().put("id", step.id).put("name", step.name).put("args", step.args).put("detail", step.detail).put("done", step.done).put("error", step.error)
                         .put("kind", step.kind).put("request", step.request) })) })) }).toString()
@@ -319,8 +342,8 @@ class PhoneBotModel(application: Application) : AndroidViewModel(application) {
                         catch (error: Exception) { historyFile.failWrite(stream); throw error }
                     }
                 }
-            } catch (error: java.io.IOException) { notice = "会话保存失败：${error.message}" }
+            } catch (error: java.io.IOException) { notice = "聊天保存失败：${error.message}" }
         }
     }
-    override fun onCleared() { engine.detach(); super.onCleared() }
+    override fun onCleared() { engine.detach() }
 }

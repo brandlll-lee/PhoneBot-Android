@@ -6,6 +6,12 @@ import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
+import android.graphics.Canvas
+import android.graphics.Paint
+import android.graphics.Color
+import androidx.core.graphics.ColorUtils
+import androidx.appcompat.content.res.AppCompatResources
+import androidx.core.graphics.createBitmap
 import androidx.core.net.toUri
 import dev.phonebot.android.MainActivity
 import dev.phonebot.android.MarkdownAnswer
@@ -41,9 +47,20 @@ internal object TaskNotifications {
         val pending = PendingIntent.getActivity(context, 0, open(context, start), PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
         val summary = MarkdownAnswer.plain(event.optString("text", event.optString("message"))).take(240)
         val notification = Notification.Builder(context, CHANNEL).setSmallIcon(R.drawable.ic_phonebot_mark)
-            .setContentTitle("$title · ${start.getString("prompt").take(40)}")
+            .setLargeIcon(avatar(context, start.optLong("avatarColor", 0xFF3985FF).toInt()))
+            .setContentTitle("${start.optString("botName", "PhoneBot")} · $title")
             .setContentText(summary).setStyle(Notification.BigTextStyle().bigText(summary))
             .setVisibility(Notification.VISIBILITY_PRIVATE).setContentIntent(pending).setAutoCancel(true).setOnlyAlertOnce(true).build()
         return try { manager.notify(id, 2, notification); true } catch (_: SecurityException) { false }
+    }
+
+    private fun avatar(context: Context, color: Int) = createBitmap(96, 96).also { bitmap ->
+        val canvas = Canvas(bitmap)
+        canvas.drawCircle(48f, 48f, 48f, Paint(Paint.ANTI_ALIAS_FLAG).apply { this.color = color })
+        AppCompatResources.getDrawable(context, R.drawable.ic_phonebot_mark)?.mutate()?.apply {
+            setTint(if (ColorUtils.calculateLuminance(color) > .179) Color.BLACK else Color.WHITE)
+            setBounds(12, 12, 84, 84)
+            draw(canvas)
+        }
     }
 }

@@ -59,11 +59,11 @@ class SystemToolsTest {
             assertEquals(audio.getStreamVolume(AudioManager.STREAM_MUSIC), result.getInt("value"))
             assertTrue(result.getBoolean("verified"))
             assertThrows(IllegalArgumentException::class.java) { runBlocking { system.execute("volume_set", JSONObject().put("percent", 101)) } }
-            val shell = JSONObject(SystemShellService().execute("printf 'hello中文'; exit 3"))
+            val shell = JSONObject(SystemShellService().execute("system-output", "printf 'hello中文'; exit 3"))
             assertEquals(3, shell.getInt("exitCode"))
             assertFalse(shell.getBoolean("ok"))
             assertEquals("hello中文", shell.getString("output"))
-            val capped = JSONObject(SystemShellService().execute("yes x | head -c 40000"))
+            val capped = JSONObject(SystemShellService().execute("system-limit", "yes x | head -c 40000"))
             assertEquals(32768, capped.getString("output").length)
             assertTrue(capped.getBoolean("truncated"))
         } finally { audio.setStreamVolume(AudioManager.STREAM_MUSIC, previous, 0) }

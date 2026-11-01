@@ -8,7 +8,7 @@ data class EngineState(
     val pid: Int = 0,
 ) {
     val canStart get() = phase == EnginePhase.STOPPED || phase == EnginePhase.FAILED
-    val canRun get() = phase == EnginePhase.READY
+    val canRun get() = phase == EnginePhase.READY || phase == EnginePhase.RUNNING
     val canStop get() = phase == EnginePhase.STARTING || phase == EnginePhase.READY || phase == EnginePhase.RUNNING
 }
 

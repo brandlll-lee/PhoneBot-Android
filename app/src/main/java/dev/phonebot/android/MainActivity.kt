@@ -13,6 +13,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -35,9 +36,15 @@ import androidx.compose.material.icons.outlined.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.saveable.rememberSaveableStateHolder
+import androidx.compose.runtime.saveable.mapSaver
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.unit.dp
+import dev.chrisbanes.haze.*
+import dev.chrisbanes.haze.blur.*
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
@@ -66,7 +73,6 @@ import dev.phonebot.android.phone.PhonePermissions
 import rikka.shizuku.Shizuku
 import kotlinx.coroutines.launch
 import java.time.Instant
-import java.time.LocalDate
 import java.time.ZoneId
 
 class MainActivity : ComponentActivity() {
@@ -104,6 +110,10 @@ class MainActivity : ComponentActivity() {
     val snackbar = remember { SnackbarHostState() }
     var panel by rememberSaveable { mutableStateOf("") }
     var query by rememberSaveable { mutableStateOf("") }
+    val drafts = rememberSaveable(saver = mapSaver<androidx.compose.runtime.snapshots.SnapshotStateMap<String, String>>(
+        save = { it.toMap() }, restore = { values -> values.map { it.key to it.value as String }.toMutableStateMap() },
+    )) { mutableStateMapOf<String, String>() }
+    val stateHolder = rememberSaveableStateHolder()
     LaunchedEffect(model.focusedTask) {
         if (model.focusedTask.isNotEmpty()) { panel = ""; drawer.close() }
     }
@@ -122,33 +132,41 @@ class MainActivity : ComponentActivity() {
     LaunchedEffect(model.notice) {
         if (model.notice.isNotEmpty()) { val message = model.notice; model.clearNotice(); snackbar.showSnackbar(message) }
     }
-    ModalNavigationDrawer(drawerState = drawer, gesturesEnabled = model.activeTask.isEmpty(), drawerContent = {
+    ModalNavigationDrawer(drawerState = drawer, gesturesEnabled = true, drawerContent = {
         ModalDrawerSheet(drawerContainerColor = MaterialTheme.colorScheme.background, modifier = Modifier.fillMaxWidth(.84f), drawerShape = RectangleShape) {
             Column(Modifier.fillMaxSize().padding(horizontal = PhoneUi.inset)) {
                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                    SearchField(query, { query = it }, "搜索对话内容", Modifier.weight(1f).padding(top = PhoneUi.space, bottom = PhoneUi.small))
-                    ToolIcon(Icons.Outlined.Add, "新对话", { model.newSession(); scope.launch { drawer.close() } }, enabled = model.activeTask.isEmpty())
+                    SearchField(query, { query = it }, "搜索 Bot", Modifier.weight(1f).padding(top = PhoneUi.space, bottom = PhoneUi.small))
+                    ToolIcon(Icons.Outlined.Add, "创建 Bot", { model.newSession(); panel = "session"; scope.launch { drawer.close() } })
                 }
-                val filtered = model.sessions.filter { it.turns.isNotEmpty() && (it.title.contains(query, true) || it.turns.any { turn -> turn.prompt.contains(query, true) || turn.answer.contains(query, true) }) }
+                val filtered = model.sessions.filter { it.title.contains(query, true) || it.turns.any { turn -> turn.prompt.contains(query, true) || turn.answer.contains(query, true) } }.sortedByDescending { it.updated }
                 LazyColumn(Modifier.weight(1f)) {
-                    val groups = filtered.groupBy { dateGroup(it.updated) }
-                    groups.forEach { (date, sessions) ->
-                        item { Text(date, color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.labelLarge, modifier = Modifier.padding(start = PhoneUi.inset, top = PhoneUi.gap, bottom = PhoneUi.small)) }
-                        items(sessions, key = { it.id }) { session ->
-                            var menu by remember { mutableStateOf(false) }
-                            val selected = session.id == model.selectedSession
-                            Row(Modifier.fillMaxWidth().clip(MaterialTheme.shapes.medium).background(if (selected) MaterialTheme.colorScheme.surfaceContainerHighest else Color.Transparent)
-                                .clickable(enabled = model.activeTask.isEmpty()) { model.selectSession(session.id); scope.launch { drawer.close() } }.padding(start = PhoneUi.inset), verticalAlignment = Alignment.CenterVertically) {
-                                Text(session.title, Modifier.weight(1f).padding(vertical = PhoneUi.space), color = if (selected) MaterialTheme.colorScheme.tertiary else MaterialTheme.colorScheme.onSurface,
-                                    style = MaterialTheme.typography.bodyLarge, maxLines = 2, overflow = TextOverflow.Ellipsis)
-                                Box {
-                                    ToolIcon(Icons.Outlined.MoreVert, "对话选项", { menu = true }, enabled = model.activeTask.isEmpty())
-                                    DropdownMenu(menu, { menu = false }) { DropdownMenuItem(text = { Text("删除对话") }, leadingIcon = { Icon(Icons.Outlined.Delete, null) }, onClick = { menu = false; model.deleteSession(session.id) }) }
+                    items(filtered, key = { it.id }) { bot ->
+                        var menu by remember { mutableStateOf(false) }
+                        Box {
+                            Row(Modifier.fillMaxWidth().clip(MaterialTheme.shapes.medium)
+                                .background(if (bot.id == model.selectedSession) MaterialTheme.colorScheme.surfaceContainerLow else Color.Transparent)
+                                .combinedClickable(onClick = { model.selectSession(bot.id); scope.launch { drawer.close() } }, onLongClick = { menu = true })
+                                .padding(vertical = PhoneUi.inset), verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(PhoneUi.inset)) {
+                                BotAvatar(bot.avatarColor, Modifier.size(PhoneUi.touch), working = bot.turns.any { it.status == "running" })
+                                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(PhoneUi.tiny)) {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Text(bot.title, Modifier.weight(1f), style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                        Text(java.time.format.DateTimeFormatter.ofPattern("MM/dd HH:mm").format(Instant.ofEpochMilli(bot.updated).atZone(ZoneId.systemDefault())),
+                                            style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                    }
+                                    Text(bot.turns.lastOrNull()?.let { it.answer.ifBlank { it.prompt } }?.replace(Regex("[\\n\\r*#]"), " ").orEmpty(),
+                                        style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
                                 }
+                            }
+                            DropdownMenu(menu, { menu = false }) {
+                                DropdownMenuItem(text = { Text("Bot 设置") }, onClick = { menu = false; model.selectSession(bot.id); panel = "session" })
+                                DropdownMenuItem(text = { Text("删除 Bot") }, enabled = bot.turns.none { it.status == "running" }, onClick = { menu = false; model.deleteSession(bot.id) })
                             }
                         }
                     }
-                    if (filtered.isEmpty()) item { Text(if (query.isEmpty()) "暂无对话" else "没有匹配的对话", color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(PhoneUi.inset, PhoneUi.gap)) }
+                    if (filtered.isEmpty()) item { Text("没有匹配的 Bot", Modifier.padding(PhoneUi.space), color = MaterialTheme.colorScheme.onSurfaceVariant) }
                 }
                 Row(Modifier.fillMaxWidth().navigationBarsPadding().clickable { panel = "settings" }.padding(PhoneUi.inset, PhoneUi.space), verticalAlignment = Alignment.CenterVertically) {
                     Icon(Icons.Outlined.AccountCircle, null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(PhoneUi.send))
@@ -159,17 +177,27 @@ class MainActivity : ComponentActivity() {
         }
     }) {
         Scaffold(containerColor = MaterialTheme.colorScheme.background, snackbarHost = { SnackbarHost(snackbar) }, contentWindowInsets = WindowInsets.safeDrawing) { padding ->
-            Column(Modifier.fillMaxSize().padding(padding).consumeWindowInsets(padding).imePadding()) {
-                ChatHeader(model.activeTask.isEmpty(), { scope.launch { drawer.open() } }, { panel = "session" }, model::newSession, { panel = "settings" })
-                val turns = model.session?.turns.orEmpty()
-                val list = rememberLazyListState()
-                if (turns.isEmpty()) {
-                    Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
-                        Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.padding(PhoneUi.gap)) {
-                            Text("PhoneBot", style = MaterialTheme.typography.headlineLarge, fontWeight = FontWeight.SemiBold)
-                        }
-                    }
-                } else ChatMessages(turns, model.activeTask, Modifier.weight(1f).fillMaxWidth(), list, model.focusedTask)
+            val density = LocalDensity.current
+            val haze = rememberHazeState()
+            var topHeight by remember { mutableIntStateOf(0) }
+            var bottomHeight by remember { mutableIntStateOf(0) }
+            Box(Modifier.fillMaxSize().padding(padding).consumeWindowInsets(padding).imePadding()) {
+                stateHolder.SaveableStateProvider(model.selectedSession) {
+                    val list = rememberLazyListState()
+                    val turns = model.session?.turns.orEmpty()
+                    if (turns.isEmpty()) Box(Modifier.fillMaxSize().hazeSource(haze), contentAlignment = Alignment.Center) {
+                        Text(model.session?.title ?: "PhoneBot", style = MaterialTheme.typography.headlineLarge)
+                    } else ChatMessages(turns, model.activeTask, Modifier.fillMaxSize().hazeSource(haze), list, model.focusedTask,
+                        PaddingValues(start = PhoneUi.space, end = PhoneUi.space,
+                            top = with(density) { topHeight.toDp() } + PhoneUi.space,
+                            bottom = with(density) { bottomHeight.toDp() } + PhoneUi.space))
+                }
+                Box(Modifier.align(Alignment.TopCenter).fillMaxWidth().height(with(density) { topHeight.toDp() } + PhoneUi.gap).edgeBlur(haze, true))
+                Box(Modifier.align(Alignment.BottomCenter).fillMaxWidth().height(with(density) { bottomHeight.toDp() } + PhoneUi.gap).edgeBlur(haze, false))
+                Box(Modifier.align(Alignment.TopCenter).onSizeChanged { topHeight = it.height }) {
+                    ChatHeader(model.activeTask.isEmpty(), { scope.launch { drawer.open() } }, { panel = "session" }, model::newSession, { panel = "settings" }, model.session)
+                }
+                Column(Modifier.align(Alignment.BottomCenter).onSizeChanged { bottomHeight = it.height }) {
                 if (model.permission.isNotEmpty()) {
                     val required = model.permissions.find { it.id == model.permission }
                     Column(Modifier.fillMaxWidth().padding(horizontal = PhoneUi.space).clip(MaterialTheme.shapes.medium).background(MaterialTheme.colorScheme.surfaceContainer).padding(PhoneUi.space)) {
@@ -191,7 +219,9 @@ class MainActivity : ComponentActivity() {
                         }
                     }
                 }
-                Composer(model, engine.phase, { panel = "providers"; if (engine.canRun) model.catalog() }, { panel = "session" })
+                TaskComposer(drafts[model.selectedSession].orEmpty(), { drafts[model.selectedSession] = it },
+                    model.activeTask.isNotEmpty(), engine.canRun, model::submit, model::cancel)
+                }
             }
         }
     }
@@ -203,14 +233,16 @@ class MainActivity : ComponentActivity() {
                 val title = when {
                     panel == "settings" -> "设置"
                     panel == "providers" -> "模型服务"
+                    panel == "bot-models" -> "选择模型服务"
+                    panel.startsWith("bot-provider:") -> model.providers.find { it.id == panel.removePrefix("bot-provider:") }?.name.orEmpty()
                     panel == "permissions" -> "权限"
-                    panel == "session" -> "会话设置"
+                    panel == "session" -> "Bot 设置"
                     panel == "helpers" -> "设备助手"
                     panel == "appearance" -> "外观"
                     else -> model.providers.find { it.id == providerId }?.name ?: providerId
                 }
                 Row(Modifier.fillMaxWidth().padding(PhoneUi.inset), verticalAlignment = Alignment.CenterVertically) {
-                    if (panel != "settings") ToolIcon(Icons.AutoMirrored.Filled.ArrowBack, "返回", { panel = if (panel.startsWith("provider:")) "providers" else "settings" }) else Spacer(Modifier.width(PhoneUi.touch))
+                    if (panel != "settings") ToolIcon(Icons.AutoMirrored.Filled.ArrowBack, "返回", { panel = when { panel.startsWith("bot-provider:") -> "bot-models"; panel == "bot-models" -> "session"; panel.startsWith("provider:") -> "providers"; else -> "settings" } }) else Spacer(Modifier.width(PhoneUi.touch))
                     Text(title, Modifier.weight(1f), textAlign = androidx.compose.ui.text.style.TextAlign.Center, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold, maxLines = 2)
                     ToolIcon(Icons.Outlined.Close, "关闭设置", { panel = "" }, filled = true)
                 }
@@ -220,8 +252,6 @@ class MainActivity : ComponentActivity() {
                             SettingsRow(Icons.Outlined.AccountCircle, "模型服务", model.providers.find { it.id == model.provider }?.name.orEmpty()) { panel = "providers"; model.catalog() }
                             InsetDivider()
                             SettingsRow(Icons.Outlined.Lock, "权限", "${model.permissions.count { it.granted }}/${model.permissions.size}") { model.refreshPermissions(); panel = "permissions" }
-                            InsetDivider()
-                            SettingsRow(Icons.Outlined.Settings, "会话设置") { panel = "session" }
                             InsetDivider()
                             SettingsRow(Icons.Outlined.Settings, "设备助手") { panel = "helpers"; model.helperCommand("status") }
                         }
@@ -243,10 +273,16 @@ class MainActivity : ComponentActivity() {
                             SettingsRow(Icons.Outlined.Settings, mode.label, if (model.appearance == mode) "已选择" else "", arrow = false) { model.chooseAppearance(mode) }
                         }
                     }
+                    panel == "bot-models" -> ProviderList(model, engine.canRun && model.activeTask.isEmpty()) { id -> panel = "bot-provider:$id"; model.catalog(id) }
+                    panel.startsWith("bot-provider:") -> ProviderDetail(model, panel.removePrefix("bot-provider:"), engine.canRun && model.activeTask.isEmpty(), true)
                     panel == "providers" -> ProviderList(model, engine.canRun) { id -> panel = "provider:$id"; model.catalog(id) }
                     panel == "session" -> Column(Modifier.verticalScroll(rememberScrollState()).padding(PhoneUi.space), verticalArrangement = Arrangement.spacedBy(PhoneUi.gap)) {
                         val current = model.session
                         val enabled = model.activeTask.isEmpty()
+                        BotEditor(model, enabled)
+                        SettingsGroup {
+                            SettingsRow(Icons.Outlined.AccountCircle, "模型", current?.model?.ifEmpty { "选择模型" }.orEmpty(), enabled = enabled) { panel = "bot-models"; model.catalog() }
+                        }
                         SettingsGroup {
                             listOf("builtin" to "内置助手", "shizuku" to "Shizuku").forEachIndexed { index, (id, label) ->
                                 if (index > 0) InsetDivider()
@@ -260,7 +296,7 @@ class MainActivity : ComponentActivity() {
                             }
                         }
                         SettingsGroup {
-                            SettingsRow(Icons.Outlined.Check, "设为新会话默认配置", enabled = enabled) { model.savePhoneDefaults() }
+                            SettingsRow(Icons.Outlined.Check, "设为新 Bot 默认配置", enabled = enabled) { model.savePhoneDefaults() }
                             InsetDivider()
                             SettingsRow(Icons.Outlined.Lock, "连接和授权") { panel = "helpers"; model.helperCommand("status") }
                         }
@@ -291,7 +327,7 @@ class MainActivity : ComponentActivity() {
         val prompt = auth.getJSONObject("params")
         var answer by remember(auth.getString("id")) { mutableStateOf("") }
         var visible by remember { mutableStateOf(false) }
-        AlertDialog(onDismissRequest = model::cancel, title = { Text("连接服务商") }, containerColor = MaterialTheme.colorScheme.surface,
+        AlertDialog(onDismissRequest = model::cancelAuth, title = { Text("连接服务商") }, containerColor = MaterialTheme.colorScheme.surface,
             text = { Column(verticalArrangement = Arrangement.spacedBy(PhoneUi.space)) {
                 model.authEvent?.let { AuthLinks(it) }
                 Text(prompt.getString("message"))
@@ -302,50 +338,29 @@ class MainActivity : ComponentActivity() {
                     trailingIcon = if (prompt.optString("type") == "secret") { { TextButton(onClick = { visible = !visible }) { Text(if (visible) "隐藏" else "显示") } } } else null)
             } },
             confirmButton = { if (prompt.optString("type") != "select") TextButton(onClick = { model.answerAuth(answer); answer = "" }, enabled = answer.isNotBlank() || prompt.optString("type") == "text") { Text("继续") } },
-            dismissButton = { TextButton(onClick = model::cancel) { Text("取消") } })
+            dismissButton = { TextButton(onClick = model::cancelAuth) { Text("取消") } })
     }
 }
 
-@Composable internal fun ChatHeader(idle: Boolean, conversations: () -> Unit, session: () -> Unit, newChat: () -> Unit, settings: () -> Unit) {
+@Composable internal fun ChatHeader(idle: Boolean, conversations: () -> Unit, session: () -> Unit, newChat: () -> Unit, settings: () -> Unit, bot: ChatSession? = null) {
     var menu by remember { mutableStateOf(false) }
     val identity = remember { MutableInteractionSource() }
     Row(Modifier.fillMaxWidth().padding(horizontal = PhoneUi.inset, vertical = PhoneUi.small),
         verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(PhoneUi.small)) {
         ToolIcon(Icons.Outlined.Menu, "打开对话列表", conversations, filled = true)
         Surface(onClick = session, interactionSource = identity, modifier = Modifier.weight(1f).heightIn(min = PhoneUi.touch).testTag("chat_identity"),
-            shape = CircleShape, color = MaterialTheme.colorScheme.background, border = BorderStroke(PhoneUi.hairline, MaterialTheme.colorScheme.outlineVariant)) {
+            shape = CircleShape, color = MaterialTheme.colorScheme.background.copy(alpha = PhoneUi.glassAlpha), shadowElevation = PhoneUi.floatingElevation, border = BorderStroke(PhoneUi.hairline, MaterialTheme.colorScheme.outlineVariant)) {
             Row(Modifier.padding(horizontal = PhoneUi.inset), horizontalArrangement = Arrangement.spacedBy(PhoneUi.small, Alignment.CenterHorizontally), verticalAlignment = Alignment.CenterVertically) {
-                PhoneBotLogo(working = !idle, interactionSource = identity)
-                Text("My phonebot", style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                BotAvatar(bot?.avatarColor ?: 0xFF3985FF, Modifier.size(PhoneUi.logo), working = !idle, interactionSource = identity)
+                Text(bot?.title ?: "PhoneBot", style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
         }
         Box {
             ToolIcon(Icons.Outlined.MoreVert, "更多选项", { menu = true }, filled = true, modifier = Modifier.rotate(90f))
             DropdownMenu(menu, { menu = false }) {
-                DropdownMenuItem(text = { Text("新对话") }, enabled = idle, onClick = { menu = false; newChat() })
+                DropdownMenuItem(text = { Text("创建 Bot") }, onClick = { menu = false; newChat() })
                 DropdownMenuItem(text = { Text("设置") }, onClick = { menu = false; settings() })
             }
-        }
-    }
-}
-
-@Composable internal fun ScreenSelector(screen: String, enabled: Boolean, choose: (String) -> Unit, configure: () -> Unit) {
-    var expanded by remember { mutableStateOf(false) }
-    Box {
-        OutlinedButton(onClick = { expanded = true }, enabled = enabled, shape = CircleShape,
-            border = BorderStroke(PhoneUi.hairline, MaterialTheme.colorScheme.outlineVariant), contentPadding = PaddingValues(horizontal = PhoneUi.inset, vertical = PhoneUi.tiny),
-            colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.onSurfaceVariant),
-            modifier = Modifier.heightIn(min = PhoneUi.touch).testTag("screen_selector")) {
-            Text(if (screen == "virtual") "虚拟屏幕" else "主屏幕", style = MaterialTheme.typography.bodyMedium)
-            Icon(Icons.Outlined.KeyboardArrowDown, "选择屏幕", Modifier.padding(start = PhoneUi.small).size(PhoneUi.space))
-        }
-        DropdownMenu(expanded, { expanded = false }) {
-            listOf("main" to "主屏幕", "virtual" to "虚拟屏幕").forEach { (id, label) ->
-                DropdownMenuItem(text = { Text(label) }, enabled = enabled && (id == "main" || Build.VERSION.SDK_INT >= 34),
-                    trailingIcon = { if (screen == id) Icon(Icons.Outlined.Check, null) }, onClick = { choose(id); expanded = false })
-            }
-            HorizontalDivider()
-            DropdownMenuItem(text = { Text("会话设置") }, onClick = { expanded = false; configure() })
         }
     }
 }
@@ -360,7 +375,7 @@ class MainActivity : ComponentActivity() {
     LaunchedEffect(state) { if (state?.optBoolean("paired") == true || state?.optString("state") in setOf("ready", "running")) code = "" }
     val network = model.permissions.firstOrNull { it.id == "local_network" }
     Column(Modifier.verticalScroll(rememberScrollState()).padding(PhoneUi.space), verticalArrangement = Arrangement.spacedBy(PhoneUi.space)) {
-        Text("连接由所有会话共享。主屏普通操作只需无障碍权限。", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodyMedium)
+        Text("连接由所有 Bot 共享。主屏普通操作只需无障碍权限。", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodyMedium)
         SettingsGroup {
             SettingsRow(Icons.Outlined.Settings, "内置助手", helperStateName(state?.optString("state")), arrow = false)
         }
@@ -404,56 +419,25 @@ private fun helperStateName(state: String?): String = when (state) {
     else -> "未连接"
 }
 
-@Composable private fun Composer(model: PhoneBotModel, phase: EnginePhase, chooseModel: () -> Unit, configurePhone: () -> Unit) {
-    TaskComposer(model.model.ifEmpty { if (phase == EnginePhase.STARTING) "正在启动" else "选择模型" }, model.models.takeIf { model.modelProvider == model.provider }.orEmpty(),
-        model.activeTask.isNotEmpty(), phase == EnginePhase.READY,
-        { if (model.provider.isNotEmpty()) model.catalog(model.provider) },
-        { model.choose(model.provider, it) }, chooseModel, model::submit, model::cancel,
-        model.session?.screen ?: "main", { model.choosePhone(screen = it) }, configurePhone)
-}
-
-@Composable internal fun TaskComposer(modelName: String, models: List<PiModel>, busy: Boolean, ready: Boolean,
-    loadModels: () -> Unit, choose: (String) -> Unit, configure: () -> Unit, submit: (String) -> Boolean, cancel: () -> Unit,
-    screen: String = "main", chooseScreen: (String) -> Unit = {}, configurePhone: () -> Unit = {}) {
-    var input by rememberSaveable { mutableStateOf("") }
-    var expanded by remember { mutableStateOf(false) }
+@Composable internal fun TaskComposer(input: String, onInput: (String) -> Unit, busy: Boolean, ready: Boolean, submit: (String) -> Boolean, cancel: () -> Unit) {
     val focus = LocalFocusManager.current
     val keyboard = LocalSoftwareKeyboardController.current
     val send = {
         if (!busy && ready && input.isNotBlank() && submit(input.trim())) {
-            input = ""
+            onInput("")
             focus.clearFocus()
             keyboard?.hide()
         }
     }
     Column(Modifier.fillMaxWidth().padding(horizontal = PhoneUi.inset, vertical = PhoneUi.tiny), verticalArrangement = Arrangement.spacedBy(PhoneUi.tiny)) {
-        Row(horizontalArrangement = Arrangement.spacedBy(PhoneUi.small), verticalAlignment = Alignment.CenterVertically) {
-        Box(Modifier.weight(1f, fill = false)) {
-            OutlinedButton(onClick = { expanded = true; loadModels() }, enabled = !busy && ready, shape = CircleShape,
-                border = BorderStroke(PhoneUi.hairline, MaterialTheme.colorScheme.outlineVariant), contentPadding = PaddingValues(horizontal = PhoneUi.inset, vertical = PhoneUi.tiny),
-                colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.onSurfaceVariant),
-                modifier = Modifier.widthIn(max = PhoneUi.selectorWidth).heightIn(min = PhoneUi.touch)) {
-                Text(modelName, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false), color = MaterialTheme.colorScheme.onSurface, style = MaterialTheme.typography.bodyMedium)
-                Icon(Icons.Outlined.KeyboardArrowDown, "选择模型", modifier = Modifier.padding(start = PhoneUi.small).size(PhoneUi.space))
-            }
-            DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }, modifier = Modifier.widthIn(max = PhoneUi.menuWidth).heightIn(max = PhoneUi.menuHeight)) {
-                models.forEach { item -> DropdownMenuItem(text = { Text(item.name, maxLines = 1, overflow = TextOverflow.Ellipsis) },
-                    trailingIcon = { if (item.id == modelName) Icon(Icons.Outlined.Check, null, tint = MaterialTheme.colorScheme.tertiary) },
-                    onClick = { choose(item.id); expanded = false }) }
-                HorizontalDivider()
-                DropdownMenuItem(text = { Text("管理模型服务") }, onClick = { expanded = false; configure() })
-            }
-        }
-        ScreenSelector(screen, !busy, chooseScreen, configurePhone)
-        }
         val style = MaterialTheme.typography.bodyLarge.copy(color = MaterialTheme.colorScheme.onSurface)
         val measurer = rememberTextMeasurer()
         val density = LocalDensity.current
-        BoxWithConstraints(Modifier.fillMaxWidth().clip(MaterialTheme.shapes.extraLarge).background(MaterialTheme.colorScheme.surface)
+        BoxWithConstraints(Modifier.fillMaxWidth().clip(MaterialTheme.shapes.extraLarge).background(MaterialTheme.colorScheme.surface.copy(alpha = PhoneUi.glassAlpha))
             .border(PhoneUi.hairline, MaterialTheme.colorScheme.outlineVariant, MaterialTheme.shapes.extraLarge).heightIn(min = PhoneUi.touch).testTag("composer")) {
             val width = with(density) { (maxWidth - PhoneUi.composerEnd).roundToPx().coerceAtLeast(1) }
             val multiline = input.isNotEmpty() && measurer.measure(input, style, constraints = Constraints(maxWidth = width)).lineCount > 1
-            BasicTextField(input, { if (it.length <= 12000) input = it }, maxLines = 5,
+            BasicTextField(input, { if (it.length <= 12000) onInput(it) }, maxLines = 5,
                 modifier = Modifier.fillMaxWidth().padding(start = PhoneUi.space, end = if (multiline) PhoneUi.space else PhoneUi.touch,
                     top = PhoneUi.inset, bottom = if (multiline) PhoneUi.touch else PhoneUi.inset).testTag("task_input"),
                 textStyle = style, cursorBrush = SolidColor(MaterialTheme.colorScheme.tertiary), keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
@@ -486,7 +470,7 @@ private fun helperStateName(state: String?): String = when (state) {
     }
 }
 
-@Composable private fun ProviderDetail(model: PhoneBotModel, id: String, ready: Boolean) {
+@Composable private fun ProviderDetail(model: PhoneBotModel, id: String, ready: Boolean, selectModel: Boolean = false) {
     val provider = model.providers.find { it.id == id } ?: return
     var search by rememberSaveable(id) { mutableStateOf("") }
     var searchStarted by remember(id) { mutableStateOf(false) }
@@ -495,7 +479,7 @@ private fun helperStateName(state: String?): String = when (state) {
         else searchStarted = true
     }
     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(PhoneUi.space), verticalArrangement = Arrangement.spacedBy(PhoneUi.inset)) {
-        item {
+        if (!selectModel) item {
             SettingsGroup {
                 provider.auth.forEachIndexed { index, auth ->
                     SettingsRow(Icons.Outlined.Lock, if (provider.configured) "修改认证 · ${auth.second}" else auth.second, enabled = ready) { model.login(id, auth.first) }
@@ -511,17 +495,17 @@ private fun helperStateName(state: String?): String = when (state) {
                 val message = auth.optString("message").ifEmpty { auth.optString("instructions") }
                 if (message.isNotEmpty()) Text(message, style = MaterialTheme.typography.bodyMedium)
                 AuthLinks(auth)
-                TextButton(onClick = model::cancel) { Text("取消认证") }
+                TextButton(onClick = model::cancelAuth) { Text("取消认证") }
             }
         }
-        item {
+        if (selectModel) item {
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 Text("模型", Modifier.weight(1f), color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodyMedium)
                 ToolIcon(Icons.Outlined.Refresh, "刷新 Pi 模型目录", { model.refresh(id) }, enabled = ready)
             }
             SearchField(search, { search = it }, "搜索模型")
         }
-        items(model.models.filter { it.name.contains(search, true) || it.id.contains(search, true) }, key = { it.id }) { item ->
+        if (selectModel) items(model.models.filter { it.name.contains(search, true) || it.id.contains(search, true) }, key = { it.id }) { item ->
             val selected = model.provider == id && model.model == item.id
             Row(Modifier.fillMaxWidth().clip(MaterialTheme.shapes.medium).background(if (selected) MaterialTheme.colorScheme.surfaceContainerHighest else Color.Transparent)
                 .clickable(enabled = ready) { model.choose(id, item.id) }.padding(PhoneUi.space), verticalAlignment = Alignment.CenterVertically) {
@@ -532,8 +516,8 @@ private fun helperStateName(state: String?): String = when (state) {
                 if (selected) Icon(Icons.Outlined.Check, "默认模型", tint = MaterialTheme.colorScheme.tertiary)
             }
         }
-        if (model.models.size < model.modelTotal) item { TextButton(onClick = { model.catalog(id, model.models.size, search) }, enabled = ready) { Text("加载更多模型") } }
-        if (model.models.isEmpty()) item { Text(if (ready) "目录为空。连接后刷新模型。" else "正在读取目录", color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(PhoneUi.space)) }
+        if (selectModel && model.models.size < model.modelTotal) item { TextButton(onClick = { model.catalog(id, model.models.size, search) }, enabled = ready) { Text("加载更多模型") } }
+        if (selectModel && model.models.isEmpty()) item { Text(if (ready) "目录为空。连接后刷新模型。" else "正在读取目录", color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(PhoneUi.space)) }
         if (model.provider == id && model.model.isNotEmpty()) item {
             FilledTonalButton(onClick = model::verify, enabled = ready && (provider.configured || provider.ambient), modifier = Modifier.fillMaxWidth().padding(top = PhoneUi.inset)) { Text("验证连接") }
         }
@@ -584,8 +568,4 @@ private fun helperStateName(state: String?): String = when (state) {
 private fun phaseName(phase: EnginePhase) = when (phase) {
     EnginePhase.STOPPED -> "已停止"; EnginePhase.STARTING -> "正在启动"; EnginePhase.READY -> "就绪"
     EnginePhase.RUNNING -> "运行中"; EnginePhase.STOPPING -> "正在停止"; EnginePhase.FAILED -> "启动失败"
-}
-private fun dateGroup(time: Long): String {
-    val date = Instant.ofEpochMilli(time).atZone(ZoneId.systemDefault()).toLocalDate()
-    return when { date == LocalDate.now() -> "今天"; date == LocalDate.now().minusDays(1) -> "昨天"; date.isAfter(LocalDate.now().minusDays(7)) -> "7 天内"; else -> "更早" }
 }

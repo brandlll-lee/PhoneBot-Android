@@ -185,6 +185,9 @@ class PhoneDisplayTest {
         val result = call("input_text", JSONObject().put("resourceId", "android:id/edit").put("text", "替换中文内容"))
         assertTrue(result.toString(), result.getBoolean("inputVerified"))
         assertTrue(screen(displayId).getJSONArray("elements").objects().any { it.optString("text") == "替换中文内容" })
+        val repeated = call("input_text", JSONObject().put("resourceId", "android:id/edit").put("text", "再次替换中文内容"))
+        assertTrue(repeated.toString(), repeated.getBoolean("inputVerified"))
+        assertTrue(screen(displayId).getJSONArray("elements").objects().any { it.optString("text") == "再次替换中文内容" })
     }
 
     @Test fun virtualPreservesMainActivityAndRejectsItsApp() = withPhone {

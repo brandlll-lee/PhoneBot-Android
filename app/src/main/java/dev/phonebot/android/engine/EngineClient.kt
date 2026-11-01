@@ -75,7 +75,7 @@ class EngineClient(private val context: Context) {
 
     fun probe() = send(JSONObject().put("type", "probe"))
     fun command(command: JSONObject) = send(command)
-    fun cancel() = send(JSONObject().put("type", "cancel"))
+    fun cancel(taskId: String) = send(JSONObject().put("type", "cancel").put("taskId", taskId))
     fun stop() {
         terminalState = EngineState(EnginePhase.STOPPED)
         mutableState.value = mutableState.value.copy(phase = EnginePhase.STOPPING)

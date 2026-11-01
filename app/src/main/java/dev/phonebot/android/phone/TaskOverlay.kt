@@ -43,6 +43,7 @@ import androidx.savedstate.SavedStateRegistryOwner
 import androidx.savedstate.setViewTreeSavedStateRegistryOwner
 import dev.phonebot.android.PhoneBotTheme
 import dev.phonebot.android.PhoneBotLogo
+import dev.phonebot.android.BotAvatar
 import dev.phonebot.android.PhoneUi
 import dev.phonebot.android.engine.TaskNotifications
 import kotlinx.coroutines.suspendCancellableCoroutine
@@ -60,9 +61,10 @@ internal class TaskOverlay(private val service: PhoneAccessibilityService) : Sav
     private var area by mutableStateOf(screenBounds())
     private var window: FrameLayout? = null
     private var task = ""
+    val taskId get() = task
     private var expanded by mutableStateOf(false)
     private var display by mutableStateOf<PhoneDisplay?>(null)
-    private var start = JSONObject()
+    private var start by mutableStateOf(JSONObject())
     private val params = WindowManager.LayoutParams(
         WindowManager.LayoutParams.WRAP_CONTENT, WindowManager.LayoutParams.WRAP_CONTENT,
         WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY,
@@ -150,7 +152,7 @@ internal class TaskOverlay(private val service: PhoneAccessibilityService) : Sav
             .semantics { contentDescription = if (display?.virtual == true) "查看 Agent 屏幕" else "返回当前会话" }, contentAlignment = Alignment.Center) {
             Box(Modifier.size(PhoneUi.bubble).clip(CircleShape).background(colors.background)
                 .border(PhoneUi.hairline, colors.outlineVariant, CircleShape), contentAlignment = Alignment.Center) {
-                PhoneBotLogo(working = true, interactionSource = interaction)
+                BotAvatar(start.optLong("avatarColor", 0xFF3985FF), Modifier.fillMaxSize(), working = true, interactionSource = interaction)
             }
             Box(Modifier.align(Alignment.BottomEnd).padding(PhoneUi.tiny).size(PhoneUi.activityDot)
                 .background(colors.tertiary, CircleShape).border(PhoneUi.frameLine, colors.background, CircleShape))

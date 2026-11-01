@@ -14,9 +14,9 @@ The phases are `STOPPED`, `STARTING`, `READY`, `RUNNING`, `STOPPING`, and `FAILE
 
 Startup has a 20-second deadline. A connection check and each single host tool have 30-second deadlines. `do_steps` has a 90-second deadline and accepts at most 12 actions. Pi owns argument schema validation, request streaming, and the sequential agent loop.
 
-Task cancellation aborts the active Pi request and pending host waits. Kotlin cancels tool work and rejects later calls for that task. Each tool checks cancellation before an Android action. A dispatched system gesture can finish; cancellation cannot undo it.
+Task cancellation aborts the active Pi request and pending host waits. Kotlin cancels tool work and rejects later calls for that task. Each tool carries a task ID and checks that task's cancellation before an Android action. A dispatched system gesture can finish; cancellation cannot undo it.
 
-Engine shutdown allows three seconds before ending the private process. Node supports one instance per process, so each restart uses a new process. The client completes disconnection before it enables Start. Binding uses `BIND_AUTO_CREATE` so service creation also covers a restart during process removal. The engine replays the current task's journal for UI reconnection.
+Engine shutdown allows three seconds before ending the private process. Node supports one instance per process, so each restart uses a new process. The client completes disconnection before it enables Start. Binding uses `BIND_AUTO_CREATE` so service creation also covers a restart during process removal. The engine replays each active task's journal for UI reconnection.
 
 JNI sets `HOME`, `TMPDIR`, and the working directory before `node::Start`. Node receives a 256 MiB V8 old-space limit. This limit does not cap total native memory. TLS uses Node's bundled trust roots. The app keeps certificate verification enabled.
 
@@ -78,9 +78,9 @@ Actions accept an optional `expect` condition and `timeoutMs`. Conditions match 
 
 ## Session screens and helpers
 
-`ChatSession` saves `helper` and `screen` in the existing chat file. New sessions inherit saved defaults. Existing records default to Shizuku and main screen. Task start fixes the session's selection. The UI cannot change it during execution. Task events record the selected helper, mode and actual display ID. Pi receives the current screen mode in its system prompt.
+`ChatSession` stores each Bot's user-defined name, avatar color, provider/model, helper and screen in the existing chat file. Existing IDs and history are retained. Empty Bots are saved. New Bots inherit saved screen/helper defaults. Task start fixes the Bot's selection. Task events include its identity, helper, mode and actual display ID. Pi receives the current screen mode in its system prompt.
 
-`PhoneDisplay` owns one lazy virtual display for the active session. It needs Android 14 or later. The shell creates a trusted display with independent focus, no top-focus stealing, local IME and its own display group. Launch intents carry `ActivityOptions.setLaunchDisplayId`. A target app already visible on the main screen is rejected. If a virtual task moves to the main screen, later phone actions pause for user review. The virtual path does not fall back to main. Session/configuration changes and engine shutdown release the display. Helper death invalidates its Binder and the display. Recovery creates a fresh display; old element IDs are not reused.
+`PhoneDisplay` owns one lazy virtual display per running Bot. It needs Android 14 or later. The shell creates a trusted display with independent focus, no top-focus stealing, local IME and its own display group. Launch intents carry `ActivityOptions.setLaunchDisplayId`. A target app already visible on the main screen is rejected. If a virtual task moves to the main screen, later phone actions pause for user review. The virtual path does not fall back to main. Task completion, cancellation and engine shutdown release that task's display. Viewing another Bot does not change an execution target. Helper death invalidates its Binder and the display. Recovery creates a fresh display; old element IDs are not reused.
 
 The display's Binder death handler closes its ImageReader and frame thread. Cancellation during creation closes the new display before returning. ML Kit initializes once in the engine application's startup. Accessibility reconnection creates recognizers as needed and closes them on service destruction.
 
@@ -102,7 +102,7 @@ Shizuku API/provider 13.1.5 supplies the other transport. The application sets e
 
 ## Local task preview
 
-`PhoneAccessibilityService` owns one `TaskOverlay`. `EngineService` supplies the active user task and selected display. Result, error, cancellation and engine shutdown remove the window. The overlay shows a logo circle or virtual screen. Main-screen taps open the recorded conversation. Appearance travels through the existing Messenger connection and reconnect handshake. It does not enter Pi's command stream.
+`PhoneAccessibilityService` owns one `TaskOverlay`. `EngineService` supplies the viewed running Bot's identity and display. With other Bots still running, a terminal event selects another active preview. Engine shutdown removes the window. The overlay shows a logo circle or virtual screen. Main-screen taps open the recorded conversation. Appearance travels through the existing Messenger connection and reconnect handshake. It does not enter Pi's command stream.
 
 `PhoneDisplay.previewFrames` reads the existing virtual display's `ImageReader`. It emits changed frames at most five times per second with a width of at most 360 pixels. Bitmap copying and scaling run on a worker dispatcher under the existing image lock. Full screenshots and OCR retain their original dimensions. The Compose subscription exists only while the card is expanded. Preview frames stay in the engine process and are not encoded, saved or sent to the model.
 
@@ -126,6 +126,8 @@ On engine restart, unfinished journals receive an `interrupted` event. Recovery 
 
 `files/sessions/<session>.jsonl` is the official Pi session. `SessionManager` owns persisted messages and the model context. `createAgentSession` restores it for each task. Existing JSON transcripts are imported in order through `SessionManager`. Import uses a temporary file and publishes the new session before removing the old file. The chat UI and task journal keep their existing formats. Conversation deletion removes the Pi session, image archive and task journals.
 
+Each active Bot has an independent official `AgentSession`. Node's `AsyncLocalStorage` binds model credential callbacks to the correct task. Tool request IDs include the task ID. Cancellation and terminal events affect that task only. One Bot runs one task at a time.
+
 `AgentSession` owns the execution loop, cancellation, provider retries and automatic compaction. PhoneBot registers its phone tools as custom tools and uses sequential execution. The SDK's built-in desktop tools and resource discovery are disabled. The current screen instructions come from the Android session. Model authentication uses Pi's `ModelRuntime` with the Android encrypted credential store.
 
 Pi uses its default compaction settings. It summarizes earlier context and retains recent messages when the model context approaches its limit. The session file retains original entries and the compaction entry. Session recovery and subsequent compaction use Pi's canonical projection. System messages and tool declarations stay under Pi's control. Context summaries come from the configured model. A summary may need an additional model request.
@@ -134,6 +136,12 @@ Pi uses its default compaction settings. It summarizes earlier context and retai
 
 The runtime publishes one terminal result after `session.prompt()` settles. Compaction and automatic retry events enter the task journal. Compaction events contain status and token counts; the full summary stays in the Pi session file. The service records notification attempts by task ID after the terminal event. Live user-task terminal events can post a result notification; event replay does not. Shutdown and interruption use the same notification path.
 
+
+## Parallel phone resources
+
+Each task owns its display, `ScreenState`, element registry and `PhoneActions`. The accessibility service supplies platform APIs and per-display event times. Independent virtual displays run concurrently. A main-screen task holds the main-screen mutex for its full lifetime. Another main-screen task waits before Pi starts.
+
+App UI ownership uses the resolved package name. Switching App releases the previous package before waiting for the next. Queue waits stay outside action deadlines. Single actions retain a 30-second execution deadline; batches share 90 seconds of execution time. A shared clipboard mutex covers display-targeted paste across both helper transports. Shell execution and cancellation use a unique request ID. Finishing one task releases only its own resources. App data and accounts remain shared by Android.
 
 ## Verification
 

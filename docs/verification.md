@@ -22,13 +22,15 @@ The controlled page delays a result while its tree stays quiet. Both single and 
 
 Empty-tree tests check a valid display geometry, empty observations, and absence conditions. Navigation tests separate successful dispatch from permission to continue a batch. System tests check media-volume read-back, brightness authorization and argument validation, intent units, output limits, and system-command authorization. A test installation with running, authorized Shizuku also checks shell UID, consecutive commands, the ten-second timeout, and Wi-Fi changes. Tests restore volume, brightness, and Wi-Fi values after use. Clock/calendar contract tests capture intents and do not create entries.
 
-Composer tests use an edge-to-edge activity with resize behavior, as the main activity does. They check model selection, expanded input, the five-line height cap, rejected submission, accepted submission, focus removal, and actual IME insets before and after Send.
+Composer tests use an edge-to-edge activity with resize behavior, as the main activity does. They check expanded input, the five-line height cap, rejected submission, accepted submission, focus removal, and actual IME insets before and after Send.
 
-Session settings tests use separate storage. They check old-session defaults, saved helper/screen choices, new-session defaults and restored choices. Composer tests also check screen selection and disabled controls during execution.
+Bot settings tests use separate storage. They check old-record defaults, independent names/colors/models, saved helper/screen choices, empty Bots and restoration. Composer tests check text growth and keyboard dismissal. The actual-page test checks independent drafts and moves model/screen selection to Bot settings.
 
 `PiSessionTest` runs the packaged engine through the native Node bridge in isolated test storage. A model-stream fixture triggers official compaction. It checks JSON import, persisted summary and tool result, continuation, all 21 tools and clean shutdown. It uses fixture credentials and does not read or change the configured model accounts. Run this class once per instrumentation process because Node permits one embedded instance.
 
-`ConversationSettingsTest` opens the actual app and its conversation settings. It presses both helper choices and both screen choices, checks the selected labels and model values, and restores the original session configuration. It also checks that engine/version status rows have no click action. It preserves provider credentials and global defaults.
+`ConversationSettingsTest` opens the actual app and Bot settings. It presses both helper choices and both screen choices, checks the values and restores the original Bot configuration. It also checks appearance, contact switching, draft isolation and read-only status rows. It preserves provider credentials and global defaults.
+
+`ParallelPhoneTest` uses two separate fixture packages on two real virtual displays. It checks simultaneous clipboard-based Chinese input, screen identity, independent release, App queuing and main-screen queuing. A helper skip is not a pass. `PhoneResourcesTest` covers resource transfer and cancelled waiters. `EngineIntegrationTest#parallelProbesKeepTheirOwnEventsAndResults` runs two real Pi probes through the Android engine and checks task-bound events and results. These tests preserve model credentials.
 
 `PhoneDisplayTest` needs Android 14 and connected helpers. Run its four `shizukuMain`, `shizukuVirtual`, `builtinMain`, and `builtinVirtual` methods after authorization. A disconnected helper causes a skip, not a pass. Check instrumentation status codes. Each combination checks the actual helper UID, display geometry, Chinese input, actions, screenshots and OCR. Virtual runs also check the main task and release the previous session display. Other methods check built-in helper death and reconnection, rejected app-UID handoff, cancelled display creation, and replacement through the virtual clipboard input path. `pairBuiltin` accepts temporary `pairPort` and `pairCode` instrumentation arguments. Keep these out of saved command output and reports.
 
@@ -65,6 +67,13 @@ Use real provider credentials to validate cloud requests. Keep keys out of comma
 The lifecycle test deliberately kills the engine process. Accessibility runs in that process. On the S21, Android can retain that service in its crashed-service set while its enabled setting remains present. Before another phone-tool run, switch only PhoneBot's accessibility service off and on in system settings. The validation run restored that binding after fault injection. Normal task cancellation aborts Pi and tool work; it does not kill the process. Process ownership and automatic service recovery need a separate lifecycle change.
 
 ## Validation record
+
+Validated on 2026-11-02 for Bot contacts and parallel execution:
+
+- Runtime: 24 tests passed against source and bundle. Real Pi sessions kept tools, cancellation and persisted history separate. JVM: 9 tests passed. Both APK builds, lint and 16 KB ZIP alignment passed.
+- Samsung S21, Android 14, ARM64: 33 selected tests passed. Two virtual displays accepted concurrent clipboard-based Chinese input. Releasing one left the other usable. Same-App and main-screen queues passed. Both helpers passed main/virtual control, screenshots, OCR, input and navigation. Screen-off operation, engine restart, official Pi compaction, task routing and notifications passed.
+- UI: contacts, separate drafts/configuration, old-data restore, floating chat, both themes, keyboard, Markdown and previews passed. Seven tests also passed at 1.3 font scale. Screenshots were inspected. The original font scale and provider credentials were preserved. The installed APK updates the existing app.
+- Warm scrolling in the debug APK rendered 263 frames: median 17 ms, 90th percentile 21 ms, 7.60% missed frame deadlines. The separate automated theme/capture run included slower frames. These samples are diagnostics, not a release performance guarantee. Cloud-backed third-party tasks were not rerun.
 
 Validated on 2026-11-02 for the PhoneBot logo:
 

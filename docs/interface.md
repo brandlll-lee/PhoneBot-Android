@@ -6,7 +6,9 @@ Use this contract when changing the Compose screens.
 
 The chat is the first screen. Use a black or white background. `PhoneBotTheme` owns Material 3 color roles, typography and shapes. `PhoneUi` owns shared sizes and glow parameters. Components read these tokens. Settings offers System, Light and Dark. Save the choice and send it to the engine process through host IPC. System bars, Markdown, menus and overlays follow the same appearance.
 
-The header uses two outlined circular controls and a central Logo + My phonebot pill. The left control opens conversations. The right menu opens New conversation and Settings. The central pill opens conversation settings.
+The header uses two outlined circular controls and a central Bot avatar/name pill. The left control opens Bot contacts. The right menu opens Create Bot and Settings. The central pill opens this Bot's settings.
+
+Messages fill the chat page. The header and composer overlay them. Measured control heights set the list's top and bottom content padding. Each Bot retains its draft and scroll position. Haze 2.0.1 captures only the message layer. Its native progressive blur softens the top and bottom edges. Controls stay sharp and use shared translucent surfaces, borders and shadows. See [Haze usage](https://chrisbanes.github.io/haze/2.0.1/blur/usage/) and [performance](https://chrisbanes.github.io/haze/2.0.1/performance/).
 
 ## Logo
 
@@ -24,9 +26,7 @@ Put each trace step in its own native lazy-list item. Use stable keys and conten
 
 Render intermediate text and final replies with the same native Markdown component during streaming, after completion, and after history restore. Display a completed run's final text once, outside the trace. Keep that message's thinking blocks inside the trace. Keep the source Markdown in storage. Parse streaming tails off the UI thread. Keep rendered text visible during final parsing. Support headings, emphasis, lists, quotes, links, tables, and selectable text. Code blocks use syntax highlighting, Copy, and horizontal scrolling. Use the active palette and system text scaling.
 
-Use the empty state to show the product name. Keep model selection above the composer at the left. Use an outlined rounded button with the model name and a down arrow. Truncate long names. Reuse the Pi catalog and stored default. Provide a model-service management entry in the dropdown.
-
-Place the screen selector beside the model selector. It shows Main screen or Virtual display. Its menu opens conversation settings. Disable virtual-display selection below Android 14. Disable selection changes during a task.
+Use the empty state to show the Bot's name. Model, helper and screen selection belong in Bot settings. Keep the input area free of configuration controls.
 
 Use a compact rounded input for short text. For wrapped or multiline text, expand the same panel upward. Put text above the Send control. Keep Send at the bottom right. Show at most five lines and scroll the text area vertically beyond that limit. Keep only Send, or Stop during execution, inside the panel. Put one muted hint below it. When submission succeeds, clear the text, remove focus, hide the keyboard, and restore the compact height. A rejected submission keeps the draft and focus.
 
@@ -34,17 +34,17 @@ Use short state messages for loading, execution ended, failure, permission pause
 
 ## Drawer
 
-Use a search field, date groups, conversation rows, and a settings footer. Highlight the current conversation with a muted blue surface. Search both prompts and answers. Disable conversation changes during a task.
+Use a search field, Bot contacts and a software-settings footer. Each contact has an avatar spanning two rows. Name and last-message time share the first row. A one-line message preview fills the second row. Sort by message time. Long press opens Bot actions. Keep empty Bots. Switching contacts does not stop or retarget a task.
 
 ## Settings
 
-Use one tall sheet with a centered title, back navigation, and Close. Group related rows. Put the icon on the left and the current value on the right. Use inset dividers. Put provider authentication and model selection inside this sheet. Keep credentials out of the conversation.
+Use one tall sheet with a centered title, back navigation, and Close. Group related rows. Put the icon on the left and the current value on the right. Use inset dividers. Software settings contain shared provider authentication, device authorization, appearance and engine controls. Keep credentials out of the conversation.
 
 An arrow indicates navigation. It does not control whether a row can be pressed. Action rows follow their enabled state. Status rows have no click action.
 
 Only add a secondary label when it adds useful context. Permission purposes and Android connection status provide required information. Establish other hierarchy with font size, weight, spacing, and alignment.
 
-Conversation settings choose the helper and screen for the current conversation. New conversations inherit the saved global defaults. Existing conversations retain their choices. Old records use the main screen and Shizuku. Save these fields with the existing chat data. Device authorization stays separate from conversation choices. Basic main-screen tools do not require a helper.
+Bot settings contain the user-defined name, avatar color, provider/model, helper and screen. Reuse the phone Logo with a contrasting black or white face. Offer presets, HSV sliders and HEX entry. Each Bot keeps its own model choice; credentials stay shared. New Bots inherit saved screen/helper defaults. Existing records retain their IDs, history and choices. Old records use the main screen and Shizuku. Lock only the running Bot's configuration. Basic main-screen tools do not require a helper.
 
 The device helper page shows the actual connection state. It offers built-in ADB pairing, reconnect, forget and opt-in reboot recovery. The pairing form accepts the port from Android's pairing-code dialog and a six-digit code. Pairing and connection ports are different. PhoneBot discovers the connection port. Keep the pairing code in transient UI memory. Clear it on submission and after successful pairing. The built-in helper requires Android 12 or later.
 

@@ -22,25 +22,6 @@ import org.junit.Test
 class ComposerTest {
     @get:Rule val compose = createAndroidComposeRule<ComponentActivity>()
 
-    @androidx.test.filters.SdkSuppress(minSdkVersion = 34)
-    @Test fun screenSelectionChangesAndLocksDuringExecution() {
-        val current = mutableStateOf("main")
-        val enabled = mutableStateOf(true)
-        var settings = false
-        compose.setContent { PhoneBotTheme {
-            ScreenSelector(current.value, enabled.value, { current.value = it }, { settings = true })
-        } }
-        compose.onNodeWithContentDescription("选择屏幕").performClick()
-        compose.onNodeWithText("虚拟屏幕").performClick()
-        compose.runOnIdle { assertEquals("virtual", current.value) }
-        compose.onNodeWithText("虚拟屏幕").assertExists()
-        compose.onNodeWithContentDescription("选择屏幕").performClick()
-        compose.onNodeWithText("会话设置").performClick()
-        assertTrue(settings)
-        compose.runOnIdle { enabled.value = false }
-        compose.onNodeWithTag("screen_selector").assertIsNotEnabled()
-    }
-
     @Test fun composerExpandsCapsAndCollapsesAfterAcceptedSend() {
         compose.activityRule.scenario.onActivity {
             it.enableEdgeToEdge()
@@ -48,20 +29,18 @@ class ComposerTest {
         }
         var accepted = false
         var message = ""
-        var selected = ""
         var keyboardHeight = 0
+        val draft = mutableStateOf("")
         compose.setContent { PhoneBotTheme {
             val height = WindowInsets.ime.getBottom(LocalDensity.current)
             SideEffect { keyboardHeight = height }
             Box(Modifier.fillMaxSize().imePadding()) {
             Box(Modifier.align(Alignment.BottomCenter)) {
-                TaskComposer("very-long-model-name-with-a-readable-ending", listOf(PiModel("second", "另一个模型", false)), false, true,
-                    {}, { selected = it }, {}, { message = it; accepted }, {})
+                TaskComposer(draft.value, { draft.value = it }, false, true, { message = it; accepted }, {})
             }
         } } }
-        compose.onNodeWithContentDescription("选择模型").performClick()
-        compose.onNodeWithText("另一个模型").performClick()
-        assertEquals("second", selected)
+        compose.onNodeWithContentDescription("选择模型").assertDoesNotExist()
+        compose.onNodeWithTag("screen_selector").assertDoesNotExist()
         val input = compose.onNodeWithTag("task_input")
         val compact = compose.onNodeWithTag("composer").fetchSemanticsNode().boundsInRoot.height
         input.performClick().performTextInput("第一行\n第二行")

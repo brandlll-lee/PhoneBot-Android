@@ -23,8 +23,8 @@ import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 
-@Composable internal fun PhoneBotLogo(modifier: Modifier = Modifier, working: Boolean = false, interactionSource: InteractionSource? = null) {
-    val ink = MaterialTheme.colorScheme.onBackground
+@Composable internal fun PhoneBotLogo(modifier: Modifier = Modifier, working: Boolean = false, interactionSource: InteractionSource? = null,
+    ink: androidx.compose.ui.graphics.Color = MaterialTheme.colorScheme.onBackground) {
     val lifecycle = LocalLifecycleOwner.current.lifecycle
     val blink = remember { Animatable(1f) }
     val activity = remember { Animatable(0f) }

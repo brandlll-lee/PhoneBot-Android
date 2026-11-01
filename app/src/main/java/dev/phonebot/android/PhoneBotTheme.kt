@@ -30,6 +30,9 @@ internal object PhoneUi {
     val bubble = 40.dp
     val activityDot = 7.dp
     val hairline = .5.dp
+    val blurRadius = 20.dp
+    val floatingElevation = 1.dp
+    const val glassAlpha = .68f
     val frameLine = 1.dp
     val glowRadius = 8.dp
     const val glowAlpha = .4f
@@ -38,9 +41,6 @@ internal object PhoneUi {
     const val bubbleWidthFraction = .88f
     val composerEnd = 64.dp
     val send = 32.dp
-    val selectorWidth = 230.dp
-    val menuWidth = 320.dp
-    val menuHeight = 360.dp
     val attachmentHeight = 240.dp
     val rowHeight = 64.dp
     val rowValueWidth = 110.dp

@@ -47,9 +47,10 @@ function engine(t, entry = "src/main.mjs", baseUrl, savedHome) {
       const line = `${JSON.stringify(command)}\n`;
       if (command.type === "stop") commands.end(line); else commands.write(line);
     },
-    async next(type) {
+    async next(type, taskId) {
       const deadline = AbortSignal.timeout(20000);
-      while (!events.some((event) => event.type === type)) {
+      const matches = (event) => event.type === type && (!taskId || event.taskId === taskId);
+      while (!events.some(matches)) {
         if (child.exitCode !== null) throw new Error(`Engine exited: ${stderr}`);
         await new Promise((resolve, reject) => {
           const fail = () => reject(new Error(`Missing ${type}; ${JSON.stringify(events)}; ${stderr}`));
@@ -57,7 +58,7 @@ function engine(t, entry = "src/main.mjs", baseUrl, savedHome) {
           readers.push(() => { deadline.removeEventListener("abort", fail); resolve(); });
         });
       }
-      return events.splice(events.findIndex((event) => event.type === type), 1)[0];
+      return events.splice(events.findIndex(matches), 1)[0];
     },
     exited,
     kill: () => child.kill("SIGKILL"),
@@ -315,18 +316,65 @@ test("host tool errors reach the caller", async (t) => {
   assert.match((await host.next("error")).message, /Kotlin tool failed/);
 });
 
-test("verification rejects models outside the Pi catalog and accepts the next command", async (t) => {
+test("verification rejects models outside the Pi catalog and probes run independently", async (t) => {
   const host = engine(t);
   await host.next("ready");
   host.send({ type: "verify", provider: "unknown", model: "test" });
   assert.match((await host.next("error")).message, /Pi/);
-  host.send({ type: "probe" });
+  host.send({ type: "probe", taskId: "probe-a" });
   const tool = await host.next("tool");
-  host.send({ type: "probe" });
-  assert.match((await host.next("error")).message, /busy/);
+  host.send({ type: "probe", taskId: "probe-b" });
+  const other = await host.next("tool", "probe-b");
+  assert.notEqual(other.id, tool.id);
+  host.send({ type: "tool_result", id: other.id, result: { pid: 44 } });
+  await host.next("result", "probe-b");
   host.send({ type: "tool_result", id: tool.id, result: { pid: 43 } });
-  await host.next("result");
+  await host.next("result", "probe-a");
 });
+
+for (const entry of ["src/main.mjs", "dist/engine.mjs"]) {
+  test(`${entry}: parallel Pi sessions isolate tools, cancellation and persisted history`, async (t) => {
+    const payloads = [];
+    const fixture = await startFixture({ onRequest: (body) => payloads.push(body), turns: (body) =>
+      body.messages.at(-1).role === "tool" ? { content: "完成当前 Bot" } :
+        { tool_calls: [{ index: 0, id: "same-call", type: "function", function: { name: "screen_read", arguments: "{}" } }] } });
+    t.after(fixture.close);
+    const host = engine(t, entry, fixture.baseUrl);
+    await host.next("ready");
+    const command = (bot) => ({ type: "task", taskId: bot, session: bot, provider: "deepseek", model: "deepseek-flash", prompt: `请求-${bot}` });
+    host.send(command("bot-a"));
+    host.send(command("bot-b"));
+    const a = await host.next("tool", "bot-a");
+    const b = await host.next("tool", "bot-b");
+    assert.notEqual(a.id, b.id);
+    assert.equal(host.seen.some((e) => ["result", "idle"].includes(e.type)), false);
+    host.send({ ...command("bot-a"), taskId: "duplicate-a" });
+    assert.match((await host.next("error", "duplicate-a")).message, /Bot/);
+    await host.next("idle", "duplicate-a");
+    host.send({ type: "catalog", taskId: "catalog-control" });
+    assert.ok((await host.next("catalog", "catalog-control")).providers.length > 0);
+    await host.next("idle", "catalog-control");
+    host.send({ type: "tool_result", taskId: "bot-a", id: b.id, result: { wrongBot: true } });
+    host.send({ type: "cancel", taskId: "bot-a" });
+    await host.next("cancelled", "bot-a");
+    await host.next("idle", "bot-a");
+    host.send({ type: "tool_result", taskId: "bot-b", id: b.id, result: { owner: "bot-b" } });
+    assert.equal((await host.next("result", "bot-b")).text, "完成当前 Bot");
+    await host.next("idle", "bot-b");
+    assert.equal(host.seen.some((e) => e.taskId === "bot-b" && ["error", "cancelled"].includes(e.type)), false);
+    for (const bot of ["bot-a", "bot-b"]) {
+      const entries = readFileSync(`${host.home}/sessions/${bot}.jsonl`, "utf8").trim().split("\n").map(JSON.parse);
+      assert.equal(entries.filter((e) => e.message?.role === "user").length, 1);
+      assert.ok(JSON.stringify(entries).includes(`请求-${bot}`));
+      assert.ok(!JSON.stringify(entries).includes(`请求-${bot === "bot-a" ? "bot-b" : "bot-a"}`));
+    }
+    assert.ok(payloads.every((p) => p.tools.length === 21));
+    assert.ok(!JSON.stringify(payloads).includes("wrongBot"));
+    const completed = payloads.find((p) => p.messages.some((m) => m.role === "tool"));
+    assert.ok(JSON.stringify(completed).includes("bot-b"));
+    assert.ok(!JSON.stringify(completed).includes("请求-bot-a"));
+  });
+}
 
 test("bundled provider catalog and Pi login persist credentials through the host store", async (t) => {
   const host = engine(t, "dist/engine.mjs");

@@ -26,6 +26,54 @@ import dev.phonebot.android.PhoneBotModel
 
 @RunWith(AndroidJUnit4::class)
 class EngineIntegrationTest {
+    @Test fun parallelProbesKeepTheirOwnEventsAndResults() {
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+        val context = instrumentation.targetContext
+        val activity = instrumentation.startActivitySync(Intent(context, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+        val events = LinkedBlockingQueue<JSONObject>()
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+        val suffix = java.util.UUID.randomUUID().toString()
+        val ids = setOf("probe-a-$suffix", "probe-b-$suffix")
+        lateinit var engine: EngineClient
+        instrumentation.runOnMainSync {
+            engine = EngineClient(context)
+            scope.launch { engine.events.collect { events.add(it) } }
+            engine.start()
+        }
+        try {
+            await(engine) { it.canRun }
+            instrumentation.runOnMainSync {
+                ids.forEach { engine.command(JSONObject().put("type", "probe").put("taskId", it)) }
+            }
+            val seen = mutableListOf<JSONObject>()
+            val deadline = SystemClock.elapsedRealtime() + 30000
+            while (seen.filter { it.optString("type") == "idle" }.map { it.getString("taskId") }.toSet() != ids && SystemClock.elapsedRealtime() < deadline) {
+                val event = events.poll(250, TimeUnit.MILLISECONDS) ?: continue
+                if (event.optString("taskId") !in ids) continue
+                seen += event
+                assertTrue(event.toString(), event.optString("type") !in setOf("error", "cancelled", "interrupted"))
+            }
+            for (id in ids) {
+                val own = seen.filter { it.getString("taskId") == id }
+                for (type in listOf("running", "result", "idle")) assertEquals("$id/$type: $own", 1, own.count { it.optString("type") == type })
+                val result = own.single { it.optString("type") == "result" }
+                assertEquals(2, result.getJSONObject("evidence").getInt("requests"))
+                val info = JSONObject(result.getJSONObject("evidence").getString("toolResult"))
+                assertEquals("android", info.getString("platform"))
+                assertEquals(engine.state.value.pid, info.getInt("pid"))
+                assertTrue(own.indexOfFirst { it.optString("type") == "running" } < own.indexOfFirst { it.optString("type") == "result" })
+                assertTrue(own.indexOfFirst { it.optString("type") == "result" } < own.indexOfFirst { it.optString("type") == "idle" })
+            }
+            assertTrue("Both probes must run before either finishes: $seen",
+                seen.indexOfLast { it.optString("type") == "running" } < seen.indexOfFirst { it.optString("type") == "result" })
+        } finally {
+            instrumentation.runOnMainSync {
+                ids.forEach { engine.cancel(it) }
+                scope.cancel(); engine.detach(); activity.finish()
+            }
+        }
+    }
+
     @Test fun piCatalogAuthenticationAndSavedSelection() {
         val instrumentation = InstrumentationRegistry.getInstrumentation()
         val context = instrumentation.targetContext
@@ -58,18 +106,18 @@ class EngineIntegrationTest {
             command(JSONObject().put("type", "login").put("provider", "deepseek").put("auth", "api_key"))
             val prompt = event("auth_prompt")
             assertEquals("secret", prompt.getJSONObject("params").getString("type"))
-            command(JSONObject().put("type", "tool_result").put("id", prompt.getString("id")).put("result", "phonebot-instrumentation-key"))
+            command(JSONObject().put("type", "tool_result").put("taskId", prompt.getString("taskId")).put("id", prompt.getString("id")).put("result", "phonebot-instrumentation-key"))
             assertTrue(event("account").getBoolean("configured"))
             await(engine) { it.canRun }
             assertEquals("phonebot-instrumentation-key", CredentialVault(context).read("deepseek")!!.getString("key"))
             instrumentation.runOnMainSync { ViewModelProvider(activity)[PhoneBotModel::class.java].choose("deepseek", model) }
-            assertEquals(model, context.getSharedPreferences("phonebot", 0).getString("model", ""))
+            instrumentation.runOnMainSync { assertEquals(model, ViewModelProvider(activity)[PhoneBotModel::class.java].model) }
             command(JSONObject().put("type", "logout").put("provider", "deepseek"))
             assertTrue(!event("account").getBoolean("configured"))
             await(engine) { it.canRun }
             instrumentation.waitForIdleSync()
             assertNull(CredentialVault(context).read("deepseek"))
-            assertEquals("", context.getSharedPreferences("phonebot", 0).getString("provider", ""))
+            instrumentation.runOnMainSync { assertEquals("", ViewModelProvider(activity)[PhoneBotModel::class.java].provider) }
 
             command(JSONObject().put("type", "task").put("taskId", "journal-failure-test").put("session", "journal-test-session")
                 .put("provider", "deepseek").put("model", model).put("prompt", "打开设置"))

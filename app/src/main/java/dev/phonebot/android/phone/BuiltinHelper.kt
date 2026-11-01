@@ -216,7 +216,7 @@ internal class BuiltinHelper(private val context: Context, private val changed: 
 
     suspend fun setAutoRestore(enabled: Boolean, service: ISystemShell?) {
         if (enabled && context.checkSelfPermission("android.permission.WRITE_SECURE_SETTINGS") != PackageManager.PERMISSION_GRANTED) {
-            checkNotNull(service) { "请先连接助手" }.execute("pm grant ${context.packageName} android.permission.WRITE_SECURE_SETTINGS")
+            checkNotNull(service) { "请先连接助手" }.execute(java.util.UUID.randomUUID().toString(), "pm grant ${context.packageName} android.permission.WRITE_SECURE_SETTINGS")
             check(context.checkSelfPermission("android.permission.WRITE_SECURE_SETTINGS") == PackageManager.PERMISSION_GRANTED) { "系统未允许自动恢复" }
         }
         prefs.edit { putBoolean("auto_restore", enabled) }

@@ -28,14 +28,16 @@ You give the task. It takes action.
 
 ## What it can do
 
-- **Choose your model.** Use Pi's providers, model catalog, authentication and request implementations. Switch models above the input. Credentials stay encrypted on your phone.
+- **Choose your model.** Use Pi's providers, model catalog, authentication and request implementations. Choose a model in Bot settings. Credentials stay encrypted on your phone.
 - **Keep the conversation going.** Pi manages sessions, restoration and automatic context compaction. Reopen PhoneBot to continue an existing conversation.
 - **Operate your phone.** Open apps, read screens, tap, swipe, enter Chinese text, go Back and go Home. Use Chinese/English OCR or screenshots when needed.
-- **Choose the execution screen.** Operate the main screen or use a separate virtual display. Each conversation saves its screen and helper choice.
+- **Choose the execution screen.** Operate the main screen or use a separate virtual display. Each Bot saves its model, screen and helper choice.
 - **Watch it work.** Tap the bubble to view the live virtual display. Tap the image to collapse it. A blue dot marks an active task. Choose light, dark or system appearance.
 - **Handle everyday settings.** Read and adjust media volume, set brightness and open system settings. Use system apps for alarms, timers and calendar entries.
 - **Follow the process.** Expand the trace to inspect returned thinking, intermediate text, tool calls and results. Final replies support Markdown, tables and code blocks.
-- **Stop at any time.** Run one task at a time. Tasks pause when a required permission is missing. Stop the current task or return to its conversation from a result notification.
+- **Stop at any time.** Run different Bots on independent virtual displays. Tasks pause when a required permission is missing. Stop the current task or return to its conversation from a result notification.
+
+Create named Bots with colored avatars. Independent virtual displays run in parallel. Main-screen tasks and access to the same app queue. Tap the top avatar to configure a Bot. Use the drawer footer for software settings.
 
 ## Quick start
 
@@ -47,7 +49,7 @@ Download the APK to your phone. Open it in your file manager. Allow that file ma
 
 ### 2. Connect a model
 
-Open **··· → 设置 → 模型服务** (Settings → Model services). Choose a provider. Enter an API key or use the account login offered by that provider. Select a model and press **验证连接** (Verify connection). Change the theme under **设置 → 外观** (Settings → Appearance).
+Open **··· → 设置 → 模型服务** (Settings → Model services). Choose a provider and sign in or enter an API key. Tap the top avatar, choose a model in **Bot 设置** (Bot settings), then press **验证连接** (Verify connection). Change the theme under **设置 → 外观** (Settings → Appearance).
 
 The model must support tool calling. Screenshot input also needs image support. Pi supplies the catalog. Each provider defines its authentication methods. A successful connection check confirms that the selected model and credentials can make a request. It does not establish success for every phone task.
 
@@ -59,9 +61,9 @@ Enable **通知权限** (Notifications) and **任务结果横幅** (Task result 
 
 ### 4. Choose a screen and helper
 
-Use **主屏幕／虚拟屏幕** (Main screen / Virtual display) above the input to select the screen for this conversation. Open **会话设置** (Conversation settings) to choose **内置助手** (Built-in helper) or **Shizuku**. PhoneBot saves these choices. You do not need to select them for each task. Press **设为新会话默认配置** (Use for new conversations) to set the defaults for future conversations. Existing conversations keep their own choices.
+Tap the avatar/name at the top to open **Bot 设置** (Bot settings). Choose this Bot's model, **主屏幕／虚拟屏幕** (Main screen / Virtual display), and **内置助手／Shizuku** (Built-in helper / Shizuku). Save defaults with **设为新 Bot 默认配置**. Existing Bots keep their choices.
 
-Basic main-screen control does not need a helper. Virtual displays need Android 14 or later and a working helper. All conversations share device connections and authorization. A running task keeps its selected helper and screen.
+Basic main-screen control does not need a helper. Virtual displays need Android 14 or later and a working helper. All Bots share device connections and authorization. A running task keeps its selected helper and screen.
 
 During a task, tap the **PhoneBot** bubble to view the virtual screen. Tap the image to collapse it. Drag the bubble or image to move it. In main-screen mode, the bubble returns to the conversation. Stop the task from the chat. The bubble closes when execution ends.
 
@@ -86,7 +88,7 @@ You can also try:
 
 > Open the gallery and tell me which controls are on the current page.
 
-The buttons above the input select the model and screen. Sending a task closes the keyboard. Expand the trace to inspect each step. Press the square Stop button to cancel. After a pause, resolve the permission or connection prompt and press Continue.
+Sending a task closes the keyboard. Expand the trace to inspect each step. Press the square Stop button to cancel only this Bot's task. After a pause, resolve the permission or connection prompt and press Continue.
 
 ## Requirements and current status
 
@@ -122,7 +124,7 @@ PhoneBot runs the Pi engine on the phone. Your configured provider handles model
 
 **How do I diagnose a problem?**
 
-Run **设置 → 运行自检** (Settings → Runtime self-check) to test the embedded engine and tool bridge. Then use **模型服务 → 验证连接** (Model services → Verify connection) to test a real model request. Self-check uses a local fixture and does not consume cloud model quota. It does not verify your model connection.
+Run **设置 → 运行自检** (Settings → Runtime self-check) to test the embedded engine and tool bridge. Then use **Bot 设置 → 验证连接** (Bot settings → Verify connection) to test a real model request. Self-check uses a local fixture and does not consume cloud model quota. It does not verify your model connection.
 
 ## Development
 

@@ -4,8 +4,8 @@ import android.view.Surface;
 import android.content.Intent;
 
 interface ISystemShell {
-    String execute(String command) = 0;
-    void cancel() = 1;
+    String execute(String requestId, String command) = 0;
+    void cancel(String requestId) = 1;
     int[] identity() = 2;
     int createDisplay(in Surface surface, int width, int height, int dpi) = 3;
     void releaseDisplay(int displayId) = 4;

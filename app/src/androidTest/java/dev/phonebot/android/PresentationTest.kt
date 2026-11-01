@@ -152,6 +152,7 @@ class PresentationTest {
             val id = "presentation-notification-$type"
             val file = File(context.filesDir, "task-events/$id.jsonl")
             val start = JSONObject().put("type", "task_open").put("taskId", id).put("session", "presentation-session").put("prompt", "测试任务")
+                .put("botName", "音乐搭档").put("avatarColor", 0xFF8B5CF6)
             val end = JSONObject().put("type", type).put("taskId", id).put("text", "**已完成**")
             try {
                 file.delete()
@@ -163,7 +164,8 @@ class PresentationTest {
                     val deadline = android.os.SystemClock.elapsedRealtime() + 3000
                     while (manager.activeNotifications.none { it.tag == id } && android.os.SystemClock.elapsedRealtime() < deadline) android.os.SystemClock.sleep(50)
                     val notification = manager.activeNotifications.single { it.tag == id }.notification
-                    assertEquals("$title · 测试任务", notification.extras.getCharSequence("android.title").toString())
+                    assertEquals("音乐搭档 · $title", notification.extras.getCharSequence("android.title").toString())
+                    assertNotNull(notification.getLargeIcon())
                     assertEquals("已完成", notification.extras.getCharSequence("android.text").toString())
                     assertNotNull(notification.contentIntent)
                 }

@@ -13,11 +13,12 @@ import android.view.KeyEvent
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.withTimeout
 import org.json.JSONArray
 import org.json.JSONObject
 import kotlin.coroutines.coroutineContext
 
-internal class PhoneActions(private val service: PhoneAccessibilityService, private val screen: ScreenState) {
+internal class PhoneActions(private val service: PhoneAccessibilityService, private val screen: ScreenState, private val target: PhoneDisplay) {
     private val actions = setOf("app_launch", "app_send_intent", "phone_open_link", "tap", "swipe", "input_text", "back", "home")
 
     private suspend fun settle(expected: JSONObject?, timeout: Long, packageName: String?, dialogWindow: Int?, before: String, conditionBefore: Boolean): JSONObject {
@@ -26,11 +27,11 @@ internal class PhoneActions(private val service: PhoneAccessibilityService, priv
         var repeats = 0
         while (true) {
             coroutineContext.ensureActive()
-            check(service.available()) { "执行屏幕不可用，请检查连接和锁屏状态" }
+            check(service.available(target)) { "执行屏幕不可用，请检查连接和锁屏状态" }
             screen.scan()
             val fingerprint = screen.fingerprint()
             repeats = if (fingerprint.isNotEmpty() && fingerprint == previous) repeats + 1 else 0
-            val stable = repeats >= 2 && SystemClock.uptimeMillis() - service.lastScreenEvent >= 250
+            val stable = repeats >= 2 && SystemClock.uptimeMillis() - service.lastScreenEvent(target.displayId) >= 250
             val met = fingerprint.isNotEmpty() && expected?.let(screen::condition) == true
             val changed = fingerprint.isNotEmpty() && fingerprint != before
             val expired = SystemClock.uptimeMillis() - began >= timeout
@@ -70,6 +71,7 @@ internal class PhoneActions(private val service: PhoneAccessibilityService, priv
         }
         val results = JSONArray()
         var stopped = false
+        var remainingMs = 90000L
         for (i in 0 until steps.length()) {
             coroutineContext.ensureActive()
             val spec = steps.getJSONObject(i)
@@ -79,7 +81,8 @@ internal class PhoneActions(private val service: PhoneAccessibilityService, priv
             report(JSONObject().put("type", "step").put("id", "batch-$i").put("name", tool).put("args", args))
             val result = JSONObject().put("index", i).put("tool", tool)
             try {
-                val outcome = step(tool, args, args.optJSONObject("expect"))
+                val outcome = step(tool, args, args.optJSONObject("expect"), remainingMs)
+                remainingMs -= outcome.getLong("executionMs")
                 outcome.keys().forEach { result.put(it, outcome.get(it)) }
                 stopped = !outcome.getBoolean("canContinue")
             } catch (error: CancellationException) { throw error }
@@ -93,7 +96,22 @@ internal class PhoneActions(private val service: PhoneAccessibilityService, priv
             .put("canContinue", !stopped).put("steps", results).put("remaining", steps.length() - results.length()).put("screen", screen.present(false))
     }
 
-    private suspend fun step(name: String, params: JSONObject, expected: JSONObject?): JSONObject {
+    private suspend fun step(name: String, params: JSONObject, expected: JSONObject?, budgetMs: Long = 30000): JSONObject {
+        when (name) {
+            "app_launch" -> {
+                val name = params.getString("package")
+                require(name.matches(Regex("[a-zA-Z0-9_.]+"))) { "应用包名无效" }
+                target.reserve(service.packageManager.getLaunchIntentForPackage(name) ?: error("找不到可启动的应用"))
+            }
+            "app_send_intent", "phone_open_link" -> target.reserve(PhoneIntents.build(name, params))
+            else -> { screen.scan(); target.observePackage(screen.latest.optString("package")) }
+        }
+        val began = SystemClock.elapsedRealtime()
+        return withTimeout(minOf(30000, budgetMs)) { perform(name, params, expected) }
+            .put("executionMs", SystemClock.elapsedRealtime() - began)
+    }
+
+    private suspend fun perform(name: String, params: JSONObject, expected: JSONObject?): JSONObject {
         val target = expected ?: if (name == "app_launch") JSONObject().put("package", params.getString("package")) else null
         val timeout = params.optLong("timeoutMs", if (target == null) 2500 else 8000)
         require(timeout in 250..15000) { "等待上限需为 250 到 15000 毫秒" }
@@ -102,7 +120,7 @@ internal class PhoneActions(private val service: PhoneAccessibilityService, priv
         val before = screen.latest.optString("package").takeUnless { it == "null" || it.isEmpty() }
         val fingerprint = screen.fingerprint()
         val conditionBefore = target?.let(screen::condition) == true
-        val display = service.target?.takeIf { it.virtual }
+        val display = this.target.takeIf { it.virtual }
         val tasksBefore = display?.tasks().orEmpty()
         act(name, params)
         val result = settle(target, timeout, before.takeIf { name !in setOf("app_launch", "home", "back") }, dialogWindow, fingerprint, conditionBefore).put("inputVerified", name == "input_text")
@@ -129,18 +147,18 @@ internal class PhoneActions(private val service: PhoneAccessibilityService, priv
 
     private suspend fun act(name: String, params: JSONObject) {
         coroutineContext.ensureActive()
-        check(service.available()) { "执行屏幕不可用，请检查连接和锁屏状态" }
+        check(service.available(target)) { "执行屏幕不可用，请检查连接和锁屏状态" }
         require(name in actions) { "工具不存在" }
         when (name) {
             "app_launch" -> {
                 val target = params.getString("package")
                 require(target.matches(Regex("[a-zA-Z0-9_.]+"))) { "应用包名无效" }
                 val intent = service.packageManager.getLaunchIntentForPackage(target) ?: error("找不到可启动的应用")
-                service.target?.launch(intent) ?: service.startActivity(intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+                this.target.launch(intent)
             }
             "app_send_intent", "phone_open_link" -> {
                 val intent = PhoneIntents.build(name, params)
-                service.target?.launch(intent) ?: service.startActivity(intent)
+                target.launch(intent)
             }
             "tap" -> {
                 val node = if (params.has("element") || params.has("text") || params.has("resourceId")) screen.resolve(params) else null
@@ -148,7 +166,7 @@ internal class PhoneActions(private val service: PhoneAccessibilityService, priv
                     val bounds = node?.let { Rect().also(it::getBoundsInScreen) }
                     val point = if (bounds != null) screen.geometry.point(bounds.exactCenterX().toInt().toDouble(), bounds.exactCenterY().toInt().toDouble())
                         else screen.geometry.point(params.getDouble("x"), params.getDouble("y"))
-                    if (service.target?.virtual == true) checkNotNull(service.target).touch(point.first, point.second, point.first, point.second, 80)
+                    if (target.virtual) target.touch(point.first, point.second, point.first, point.second, 80)
                     else service.gesture(Path().apply { moveTo(point.first, point.second) }, 80)
                 }
             }
@@ -167,7 +185,7 @@ internal class PhoneActions(private val service: PhoneAccessibilityService, priv
                 val end = if (points != null) geometry.point((geometry.width * points[2]).toInt().toDouble(), (geometry.height * points[3]).toInt().toDouble()) else geometry.point(params.getDouble("endX"), params.getDouble("endY"))
                 val duration = params.optLong("duration", 400)
                 require(duration in 100..2000) { "滑动时间无效" }
-                if (service.target?.virtual == true) checkNotNull(service.target).touch(start.first, start.second, end.first, end.second, duration)
+                if (target.virtual) target.touch(start.first, start.second, end.first, end.second, duration)
                 else service.gesture(Path().apply { moveTo(start.first, start.second); lineTo(end.first, end.second) }, duration)
             }
             "input_text" -> {
@@ -179,15 +197,15 @@ internal class PhoneActions(private val service: PhoneAccessibilityService, priv
                 val text = params.getString("text")
                 require(text.length in 1..4000) { "输入长度无效" }
                 val accepted = node.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, Bundle().apply { putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, text) })
-                if (!accepted && service.target?.virtual == true) {
-                    check(node.performAction(AccessibilityNodeInfo.ACTION_FOCUS)) { "无法聚焦虚拟屏输入框" }
+                if (!accepted && target.virtual) {
+                    check(node.isFocused || node.performAction(AccessibilityNodeInfo.ACTION_FOCUS)) { "无法聚焦虚拟屏输入框" }
                     if (!node.text.isNullOrEmpty()) check(node.performAction(AccessibilityNodeInfo.ACTION_SET_SELECTION, Bundle().apply {
                         putInt(AccessibilityNodeInfo.ACTION_ARGUMENT_SELECTION_START_INT, 0)
                         putInt(AccessibilityNodeInfo.ACTION_ARGUMENT_SELECTION_END_INT, node.text.length)
                     })) { "输入框拒绝选择文字" }
-                    checkNotNull(service.target).paste(text)
+                    target.paste(text)
                 } else if (!accepted && Build.VERSION.SDK_INT >= 33) {
-                    check(node.performAction(AccessibilityNodeInfo.ACTION_FOCUS)) { "无法聚焦输入框" }
+                    check(node.isFocused || node.performAction(AccessibilityNodeInfo.ACTION_FOCUS)) { "无法聚焦输入框" }
                     val connection = service.inputMethod?.currentInputConnection ?: error("此输入框不支持文字输入")
                     connection.setSelection(0, node.text?.length ?: 0)
                     connection.commitText(text, 1, TextAttribute.Builder().build())
@@ -196,9 +214,9 @@ internal class PhoneActions(private val service: PhoneAccessibilityService, priv
                 while (SystemClock.uptimeMillis() < deadline) { if (node.refresh() && node.text?.toString() == text) break; delay(80) }
                 check(node.refresh() && node.text?.toString() == text) { "输入回读不一致。请检查页面。" }
             }
-            "back" -> if (service.target?.virtual == true) checkNotNull(service.target).key(KeyEvent.KEYCODE_BACK)
+            "back" -> if (target.virtual) target.key(KeyEvent.KEYCODE_BACK)
                 else check(service.performGlobalAction(AccessibilityService.GLOBAL_ACTION_BACK)) { "系统拒绝返回操作" }
-            "home" -> if (service.target?.virtual == true) checkNotNull(service.target).key(KeyEvent.KEYCODE_HOME)
+            "home" -> if (target.virtual) target.key(KeyEvent.KEYCODE_HOME)
                 else check(service.performGlobalAction(AccessibilityService.GLOBAL_ACTION_HOME)) { "系统拒绝主页操作" }
         }
     }

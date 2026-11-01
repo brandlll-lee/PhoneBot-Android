@@ -29,7 +29,7 @@ import kotlin.system.exitProcess
 
 @SuppressLint("PrivateApi", "DiscouragedPrivateApi")
 class SystemShellService(private val allowedUid: Int? = null) : ISystemShell.Stub() {
-    @Volatile private var process: java.lang.Process? = null
+    private val processes = java.util.concurrent.ConcurrentHashMap<String, java.lang.Process>()
     private val generation = AtomicLong()
     private val displays = mutableMapOf<Int, VirtualDisplay>()
     private val context by lazy { ShellContext.create() }
@@ -139,11 +139,12 @@ class SystemShellService(private val allowedUid: Int? = null) : ISystemShell.Stu
         }
     }
 
-    override fun execute(command: String): String {
+    override fun execute(requestId: String, command: String): String {
         authorize()
+        require(requestId.matches(Regex("[a-zA-Z0-9-]{1,80}")))
         require(command.isNotBlank() && command.length <= 4000 && '\u0000' !in command)
         val child = ProcessBuilder("/system/bin/sh", "-c", command).redirectErrorStream(true).start()
-        process = child
+        check(processes.putIfAbsent(requestId, child) == null) { "命令编号重复" }
         val output = StringBuilder()
         var truncated = false
         var outputError: IOException? = null
@@ -168,8 +169,8 @@ class SystemShellService(private val allowedUid: Int? = null) : ISystemShell.Stu
             return synchronized(output) { JSONObject().put("ok", ended && child.exitValue() == 0 && outputError == null)
                 .put("exitCode", if (ended) child.exitValue() else -1).put("timedOut", !ended).put("uid", Process.myUid())
                 .put("output", output.toString()).put("outputError", outputError?.message).put("truncated", truncated).toString() }
-        } finally { child.destroy(); process = null }
+        } finally { child.destroy(); processes.remove(requestId, child) }
     }
-    override fun cancel() { authorize(); generation.incrementAndGet(); process?.destroyForcibly() }
-    override fun destroy() { authorize(); cancel(); synchronized(displays) { displays.values.forEach { it.release() }; displays.clear() }; exitProcess(0) }
+    override fun cancel(requestId: String) { authorize(); processes[requestId]?.destroyForcibly() }
+    override fun destroy() { authorize(); generation.incrementAndGet(); processes.values.forEach { it.destroyForcibly() }; synchronized(displays) { displays.values.forEach { it.release() }; displays.clear() }; exitProcess(0) }
 }

@@ -33,8 +33,10 @@ private data class ChatRow(val turn: ChatTurn, val part: String, val step: TaskS
 }
 
 @Composable internal fun ChatMessages(turns: List<ChatTurn>, activeTask: String, modifier: Modifier = Modifier,
-    list: LazyListState = rememberLazyListState(), focusedTask: String = "") {
+    list: LazyListState = rememberLazyListState(), focusedTask: String = "",
+    contentPadding: PaddingValues = PaddingValues(horizontal = PhoneUi.space, vertical = PhoneUi.gap)) {
     var expanded by rememberSaveable { mutableStateOf(mapOf<String, Boolean>()) }
+    var positionedCount by rememberSaveable { mutableIntStateOf(-1) }
     val rows = remember(turns, activeTask, expanded) { buildList {
         turns.forEach { turn ->
             val running = turn.id == activeTask
@@ -53,8 +55,9 @@ private data class ChatRow(val turn: ChatTurn, val part: String, val step: TaskS
         }
     } }
     LaunchedEffect(focusedTask, turns.size) {
+        if (focusedTask.isEmpty() && positionedCount == turns.size) return@LaunchedEffect
         val index = if (focusedTask.isEmpty()) rows.lastIndex else rows.indexOfFirst { it.turn.id == focusedTask && it.part == "prompt" }
-        if (index >= 0) list.scrollToItem(index)
+        if (index >= 0) { list.scrollToItem(index); positionedCount = turns.size }
     }
     LaunchedEffect(turns.lastOrNull()) {
         if (focusedTask.isNotEmpty() || list.isScrollInProgress || rows.isEmpty()) return@LaunchedEffect
@@ -65,7 +68,7 @@ private data class ChatRow(val turn: ChatTurn, val part: String, val step: TaskS
             else (last.offset + last.size - list.layoutInfo.viewportEndOffset).takeIf { it > 0 }?.let { list.scrollBy(it.toFloat()) }
         }
     }
-    LazyColumn(state = list, modifier = modifier.testTag("chat_messages"), contentPadding = PaddingValues(horizontal = PhoneUi.space, vertical = PhoneUi.gap)) {
+    LazyColumn(state = list, modifier = modifier.testTag("chat_messages"), contentPadding = contentPadding) {
         items(rows, key = { it.key }, contentType = { it.part }) { row ->
             val turn = row.turn
             val running = turn.id == activeTask
