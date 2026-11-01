@@ -5,6 +5,7 @@ import android.accessibilityservice.AccessibilityServiceInfo
 import android.accessibilityservice.GestureDescription
 import android.app.KeyguardManager
 import android.content.Intent
+import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.Path
 import android.os.Build
@@ -12,7 +13,6 @@ import android.os.PowerManager
 import android.os.SystemClock
 import android.view.Display
 import android.view.accessibility.AccessibilityEvent
-import com.google.mlkit.common.MlKit
 import com.google.mlkit.vision.common.InputImage
 import com.google.mlkit.vision.text.TextRecognition
 import com.google.mlkit.vision.text.chinese.ChineseTextRecognizerOptions
@@ -29,20 +29,30 @@ import org.json.JSONArray
 import org.json.JSONObject
 
 class PhoneAccessibilityService : AccessibilityService() {
-    companion object { var instance: PhoneAccessibilityService? = null; private set }
+    companion object {
+        var instance: PhoneAccessibilityService? = null; private set
+        fun listApps(context: Context): JSONObject {
+            val intent = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER)
+            val manager = context.packageManager
+            val apps = manager.queryIntentActivities(intent, 0).distinctBy { it.activityInfo.packageName }.sortedBy { it.loadLabel(manager).toString() }
+            return JSONObject().put("apps", JSONArray(apps.take(300).map { JSONObject().put("package", it.activityInfo.packageName).put("name", it.loadLabel(manager).toString().take(120)) })).put("truncated", apps.size > 300)
+        }
+    }
     private val chineseHolder = lazy { TextRecognition.getClient(ChineseTextRecognizerOptions.Builder().build()) }
     private val latinHolder = lazy { TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS) }
     private val screen = ScreenState(this)
     private val actions = PhoneActions(this, screen)
+    internal var target: PhoneDisplay? = null; private set
     internal var lastScreenEvent = 0L; private set
 
     override fun onServiceConnected() {
         instance = this
-        // The SDK content provider runs in the main process. OCR runs in :engine.
-        MlKit.initialize(this)
         if (Build.VERSION.SDK_INT >= 33) serviceInfo = serviceInfo.apply { flags = flags or AccessibilityServiceInfo.FLAG_INPUT_METHOD_EDITOR }
     }
-    override fun onAccessibilityEvent(event: AccessibilityEvent?) { lastScreenEvent = SystemClock.uptimeMillis() }
+    override fun onAccessibilityEvent(event: AccessibilityEvent?) {
+        val id = target?.displayId ?: Display.DEFAULT_DISPLAY
+        if (event == null || Build.VERSION.SDK_INT < 30 || windowsOnAllDisplays.get(id).orEmpty().any { it.id == event.windowId }) lastScreenEvent = SystemClock.uptimeMillis()
+    }
     override fun onInterrupt() = Unit
     override fun onDestroy() {
         instance = null
@@ -52,7 +62,12 @@ class PhoneAccessibilityService : AccessibilityService() {
     }
 
     fun beginTask(id: String) { if (screen.taskId != id) { screen.reset(); screen.taskId = id } }
-    fun available(): Boolean = !getSystemService(KeyguardManager::class.java).isKeyguardLocked && getSystemService(PowerManager::class.java).isInteractive
+    internal fun bind(display: PhoneDisplay) {
+        target = display
+        if (screen.displayId != display.displayId) { screen.reset(); screen.displayId = display.displayId }
+    }
+    fun available(): Boolean = if (target?.virtual == true) target?.alive() == true else
+        !getSystemService(KeyguardManager::class.java).isKeyguardLocked && getSystemService(PowerManager::class.java).isInteractive
 
     internal suspend fun gesture(path: Path, duration: Long) = suspendCancellableCoroutine { continuation ->
         val gesture = GestureDescription.Builder().addStroke(GestureDescription.StrokeDescription(path, 0, duration)).build()
@@ -64,6 +79,7 @@ class PhoneAccessibilityService : AccessibilityService() {
     }
 
     private suspend fun capture(): Bitmap {
+        if (target?.virtual == true) return checkNotNull(target).frame()
         if (Build.VERSION.SDK_INT < 30) error("截图和 OCR 需要 Android 11 或更高版本")
         return suspendCancellableCoroutine { continuation ->
             takeScreenshot(Display.DEFAULT_DISPLAY, mainExecutor, object : TakeScreenshotCallback {
@@ -131,14 +147,10 @@ class PhoneAccessibilityService : AccessibilityService() {
 
     suspend fun execute(name: String, params: JSONObject, report: (JSONObject) -> Unit = {}): JSONObject {
         coroutineContext.ensureActive()
-        check(available()) { "请亮屏并解锁手机" }
+        if (name == "app_list") return listApps(this)
+        check(available()) { if (target?.virtual == true) "虚拟屏连接已断开" else "请亮屏并解锁手机" }
         if (name == "screen_read") return read(params.optBoolean("ocr"), params.optBoolean("image"))
         if (name == "screenshot") return read(false, true)
-        if (name == "app_list") {
-            val intent = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER)
-            val apps = packageManager.queryIntentActivities(intent, 0).distinctBy { it.activityInfo.packageName }.sortedBy { it.loadLabel(packageManager).toString() }
-            return JSONObject().put("apps", JSONArray(apps.take(300).map { JSONObject().put("package", it.activityInfo.packageName).put("name", it.loadLabel(packageManager).toString().take(120)) })).put("truncated", apps.size > 300)
-        }
         return actions.execute(name, params, report)
     }
 }

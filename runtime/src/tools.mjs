@@ -25,7 +25,7 @@ const batch = Type.Union(actions.map(([name, , , schema]) => Type.Object({ tool:
   args: Type.Object(schema, { additionalProperties: false }) }, { additionalProperties: false })));
 const definitions = [
   ["screen_read", "读取页面", "Read all visible elements in a full snapshot. Each element has id, parent, text, description, label, clickable, scrollable, editable, enabled, selected, checked and screen-pixel bounds. parent identifies its containing element; inspect children to interpret a container's label. scrollable marks regions to explore with swipe. ocr:true adds recognized text and positions; image:true adds a screenshot for vision models. Actions return these elements as a full snapshot or a diff with baseSnapshot, added, updated and removed.", { ocr: Type.Optional(Type.Boolean()), image: Type.Optional(Type.Boolean()) }],
-  ["screenshot", "截取屏幕", "Capture the unlocked main display. Returns an image for vision models.", {}],
+  ["screenshot", "截取屏幕", "Capture the session's selected display. Returns an image for vision models.", {}],
   ["app_list", "查看应用", "List launchable apps and package names.", {}],
   ["device_status", "读取设备设置", "Read actual media volume/mute, brightness, Wi-Fi and system-command availability.", {}],
   ["volume_set", "设置媒体音量", "Set media volume to 0–100 percent and read the actual level and mute state back.", { percent: Type.Integer({ minimum: 0, maximum: 100 }) }],
@@ -34,7 +34,7 @@ const definitions = [
   ["phone_set_alarm", "设置闹钟", "Open the system clock with an alarm time. Read the resulting page and verify whether the alarm was saved.", { hour: Type.Integer({ minimum: 0, maximum: 23 }), minute: Type.Integer({ minimum: 0, maximum: 59 }), label: Type.Optional(text) }],
   ["phone_set_timer", "设置计时器", "Open the system clock with a duration. Verify the timer's actual running state.", { seconds: Type.Integer({ minimum: 1, maximum: 86400 }), label: Type.Optional(text) }],
   ["phone_add_calendar_event", "添加日程", "Open the calendar editor. Times are Unix epoch milliseconds. Read the page and verify saving; opening the editor alone is not completion.", { title: text, beginTime: Type.Integer({ minimum: 1 }), endTime: Type.Integer({ minimum: 1 }), location: Type.Optional(text), description: Type.Optional(text) }],
-  ["phone_system_command", "执行系统命令", "Run a command through connected and authorized Shizuku with its shell/root permissions. Timeout 10 seconds, output at most 32768 characters. Command success is not proof of a setting change; read back the target state. Prefer phone UI tools for tapping, input and navigation.", { command: text }],
+  ["phone_system_command", "执行系统命令", "Run a device-wide command through the session's authorized helper with its shell/root permissions. Timeout 10 seconds, output at most 32768 characters. Command success is not proof of a setting change; read back the target state. Use phone UI tools for tapping, input and navigation; they target the selected display. System volume, brightness and network are device-wide.", { command: text }],
   ...actions,
   ["do_steps", "连续操作", 'Execute 1–12 known actions using the same arguments, waits and checks as single actions. Current element IDs are allowed; use semantic selectors on later pages. Stop at unknown UI. Example: input_text {resourceId:"known input",text:"query"}, tap {text:"Search",expect:{resourceId:"known result",text:"query"}}. Do not batch payments, sending, deletion, login or confirmations.', { steps: Type.Array(batch, { minItems: 1, maxItems: 12 }) }],
 ];

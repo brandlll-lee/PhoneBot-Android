@@ -8,6 +8,7 @@ import android.os.ResultReceiver
 import dev.phonebot.android.phone.PhoneAccessibilityService
 import dev.phonebot.android.phone.PhoneSystem
 import dev.phonebot.android.phone.PhoneShell
+import dev.phonebot.android.phone.PhoneDisplay
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -16,17 +17,39 @@ import kotlinx.coroutines.withTimeout
 import org.json.JSONObject
 
 class PhoneTestReceiver : BroadcastReceiver() {
+    companion object {
+        @android.annotation.SuppressLint("StaticFieldLeak")
+        private var shell: PhoneShell? = null
+        @android.annotation.SuppressLint("StaticFieldLeak")
+        private var display: PhoneDisplay? = null
+    }
     override fun onReceive(context: Context, intent: Intent) {
         @Suppress("DEPRECATION") val result = intent.getParcelableExtra<ResultReceiver>("reply") ?: return
         val pending = goAsync()
         CoroutineScope(Dispatchers.Main).launch {
             try {
-                val output = withTimeout(15000) {
+                val output = withTimeout(45000) {
                     val name = intent.getStringExtra("tool")!!
                     val params = JSONObject(intent.getStringExtra("params") ?: "{}")
-                    if (name in PhoneSystem.tools) return@withTimeout PhoneSystem(context, PhoneShell(context)).execute(name, params)
+                    val executor = shell ?: PhoneShell(context.applicationContext).also { shell = it }
+                    val target = display ?: PhoneDisplay(context.applicationContext, executor).also { display = it }
+                    if (name == "helper_status") return@withTimeout executor.state(params.optString("helper", "shizuku"))
+                    if (name == "helper_pair") { executor.pair(params.getInt("port"), params.getString("code")); return@withTimeout executor.state("builtin") }
+                    if (name == "test_release") { target.select("test-release", "shizuku", "main"); PhoneAccessibilityService.instance?.bind(target); return@withTimeout JSONObject().put("ok", true) }
+                    if (name in PhoneSystem.tools) return@withTimeout PhoneSystem(context, executor, target).execute(name, params)
                     while (PhoneAccessibilityService.instance == null) delay(100)
                     val service = checkNotNull(PhoneAccessibilityService.instance) { "无障碍服务未连接" }
+                    if (name == "test_target") {
+                        target.select(params.optString("session", "test-session"), params.getString("helper"), params.getString("screen"))
+                        target.prepare(); service.bind(target)
+                        return@withTimeout JSONObject().put("displayId", target.displayId).put("tasks", org.json.JSONArray(target.tasks()))
+                            .put("identity", org.json.JSONArray(executor.service(target.helper).identity().toList()))
+                    }
+                    if (name == "test_launch") {
+                        target.launch(Intent(context, PhoneTestActivity::class.java).putExtra("pasteInput", params.optBoolean("pasteInput")))
+                        delay(700)
+                        return@withTimeout service.execute("screen_read", JSONObject())
+                    }
                     service.execute(name, params)
                 }
                 result.send(0, Bundle().apply { putString("result", output.toString()) })

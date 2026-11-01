@@ -18,6 +18,7 @@ import android.os.ParcelFileDescriptor
 import android.os.Process
 import android.os.RemoteException
 import android.os.SystemClock
+import android.os.PowerManager
 import dev.phonebot.android.MainActivity
 import java.io.File
 import java.io.OutputStream
@@ -25,6 +26,7 @@ import org.json.JSONObject
 import dev.phonebot.android.phone.PhoneAccessibilityService
 import dev.phonebot.android.phone.PhoneShell
 import dev.phonebot.android.phone.PhoneSystem
+import dev.phonebot.android.phone.PhoneDisplay
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -42,7 +44,11 @@ class EngineService : Service() {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private val vault by lazy { CredentialVault(this) }
     private val journal by lazy { TaskJournal(File(filesDir, "task-events")) }
-    private val system by lazy { PhoneSystem(this, PhoneShell(this)) }
+    private val shell by lazy { PhoneShell(this) { handler.post { helperStates() } } }
+    private val display by lazy { PhoneDisplay(this, shell) }
+    private val system by lazy { PhoneSystem(this, shell, display) }
+    private val wakeLock by lazy { getSystemService(PowerManager::class.java).newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "PhoneBot:task").apply { setReferenceCounted(false) } }
+    private var helperJob: Job? = null
     private var toolJob: Job? = null
     private var pausedTool: JSONObject? = null
     private var authPrompt: String? = null
@@ -144,13 +150,22 @@ class EngineService : Service() {
     private fun handleCommand(json: String) {
         try {
             val command = JSONObject(json)
+            if (command.getString("type") == "helper") { helperCommand(command); return }
+            if (command.getString("type") == "phone_select") {
+                check(state.phase != EnginePhase.RUNNING) { "请先结束当前任务" }
+                display.select(command.getString("session"), command.getString("helper"), command.getString("screen"))
+                PhoneAccessibilityService.instance?.bind(display)
+                return
+            }
             if (command.getString("type") == "stop") { stopEngine(); return }
             if (command.getString("type") == "cancel") {
-                cancelled = true; pausedTool = null; authPrompt = null; promptEvent = null; loginEvent = null; toolJob?.cancel(); write(command); return
+                cancelled = true; pausedTool = null; authPrompt = null; promptEvent = null; loginEvent = null; toolJob?.cancel(); releaseWakeLock(); write(command); return
             }
             if (command.getString("type") == "resume") {
                 val pending = pausedTool ?: return
                 pausedTool = null
+                display.pauseReason = ""
+                holdWakeLock()
                 executeTool(pending)
                 return
             }
@@ -168,10 +183,12 @@ class EngineService : Service() {
             taskId = command.optString("taskId").ifEmpty { UUID.randomUUID().toString() }
             command.put("taskId", taskId)
             if (command.getString("type") == "task") {
+                display.select(command.getString("session"), command.optString("helper", "shizuku"), command.optString("screen", "main"))
                 taskStart = JSONObject(command.toString()).put("type", "task_open")
                 taskEnded = false
                 journal.append(checkNotNull(taskStart))
                 PhoneAccessibilityService.instance?.beginTask(taskId)
+                holdWakeLock()
             }
             publish(state.copy(phase = EnginePhase.RUNNING, detail = ""))
             write(command)
@@ -185,15 +202,55 @@ class EngineService : Service() {
             "ready" -> {
                 handler.removeCallbacks(startupDeadline)
                 publish(EngineState(EnginePhase.READY, "Node ${event.getString("node")} / Pi ${event.getString("pi")}", Process.myPid()))
+                helperStates()
             }
             "tool" -> executeTool(event)
             "result" -> { publish(state.copy(detail = event.toString())); emit(event, !recorded) }
             "error" -> { publish(state.copy(detail = "Error: ${event.getString("message")}")); emit(event, !recorded) }
-            "idle" -> { toolJob?.cancel(); pausedTool = null; authPrompt = null; promptEvent = null; loginEvent = null; publish(state.copy(phase = EnginePhase.READY)); emit(event, !recorded) }
+            "idle" -> { toolJob?.cancel(); pausedTool = null; authPrompt = null; promptEvent = null; loginEvent = null; releaseWakeLock(); publish(state.copy(phase = EnginePhase.READY)); emit(event, !recorded) }
             "stopped" -> finish(EngineState(EnginePhase.STOPPED))
             else -> emit(event, !recorded)
         }
     }
+
+    private fun helperStates() {
+        for (helper in listOf("builtin", "shizuku")) sendToClients {
+            eventMessage(shell.state(helper).put("type", "helper_status"))
+        }
+    }
+
+    private fun helperCommand(command: JSONObject) {
+        val helper = command.optString("helper", "builtin")
+        require(helper in setOf("builtin", "shizuku")) { "助手方式无效" }
+        val action = command.getString("action")
+        if (action == "status") { helperStates(); return }
+        if (action in setOf("forget", "recovery")) check(state.phase != EnginePhase.RUNNING) { "请先结束当前任务" }
+        check(helperJob?.isActive != true) { "助手正在连接" }
+        helperJob = scope.launch {
+            try {
+                withTimeout(45000) {
+                    when (action) {
+                        "pair" -> { require(helper == "builtin"); shell.pair(command.getInt("port"), command.getString("code")) }
+                        "connect" -> shell.service(helper)
+                        "forget" -> { require(helper == "builtin"); if (display.helper == helper) display.close(); shell.forget() }
+                        "recovery" -> shell.setAutoRestore(command.getBoolean("enabled"), helper)
+                        else -> error("助手操作无效")
+                    }
+                }
+                helperStates()
+            } catch (error: Exception) {
+                if (error is CancellationException && closing) return@launch
+                sendToClients { eventMessage(shell.state(helper).put("type", "helper_status").put("state", "error")
+                    .put("message", if (error is CancellationException) "助手连接超时" else error.message ?: "助手连接失败")) }
+            }
+        }
+    }
+
+    private fun holdWakeLock() {
+        if (display.virtual && !wakeLock.isHeld) wakeLock.acquire(30 * 60 * 1000L)
+    }
+
+    private fun releaseWakeLock() { if (wakeLock.isHeld) wakeLock.release() }
 
     private fun executeTool(event: JSONObject) {
         val name = event.getString("name")
@@ -203,21 +260,39 @@ class EngineService : Service() {
         val params = event.optJSONObject("params") ?: JSONObject()
         if (name == "auth_prompt") { authPrompt = id; promptEvent = event.put("type", "auth_prompt"); emit(event); return }
         val internal = name.startsWith("vault_") || name in setOf("runtime_info", "image_prepare")
+        val usesScreen = !internal && name !in PhoneSystem.tools && name != "app_list"
         val phone = PhoneAccessibilityService.instance
         if (taskStart?.optString("taskId") == taskId) phone?.beginTask(taskId)
-        if (!internal && name !in PhoneSystem.tools && (phone == null || !phone.available())) {
+        if (usesScreen && (phone == null || display.pauseReason.isNotEmpty() || !display.virtual && !phone.available())) {
             pausedTool = event
-            emit(JSONObject().put("type", "permission").put("taskId", taskId).put("permission", if (phone == null) "accessibility" else "unlock"))
+            releaseWakeLock()
+            emit(JSONObject().put("type", "permission").put("taskId", taskId).put("permission", if (phone == null) "accessibility" else if (display.pauseReason.isNotEmpty()) "screen" else "unlock").put("message", display.pauseReason))
             return
         }
         toolJob = scope.launch {
             val began = SystemClock.elapsedRealtime()
             val reply = JSONObject().put("type", "tool_result").put("id", id)
             try {
+                if (usesScreen) {
+                    try { withTimeout(20000) { display.prepare() } }
+                    catch (error: Exception) {
+                        if (error is CancellationException) throw error
+                        pausedTool = event
+                        releaseWakeLock()
+                        emit(JSONObject().put("type", "permission").put("taskId", taskId).put("permission", display.helper)
+                            .put("message", error.message ?: "执行屏幕不可用"))
+                        helperStates()
+                        return@launch
+                    }
+                    checkNotNull(phone).bind(display)
+                    if (taskStart?.optString("taskId") == taskId) journal.append(JSONObject().put("type", "phone_target").put("taskId", taskId)
+                        .put("helper", display.helper).put("screen", display.mode).put("displayId", display.displayId))
+                }
                 val result: Any? = withTimeout(if (name == "do_steps") 90000 else 30000) {
                     if (name in PhoneSystem.tools) return@withTimeout system.execute(name, params)
                     when (name) {
                         "runtime_info" -> JSONObject().put("platform", "android").put("sdk", Build.VERSION.SDK_INT).put("pid", Process.myPid()).put("manufacturer", Build.MANUFACTURER)
+                        "app_list" -> PhoneAccessibilityService.listApps(this@EngineService)
                         "image_prepare" -> withContext(Dispatchers.IO) {
                             val session = params.getString("session")
                             require(session.matches(Regex("[a-zA-Z0-9-]{1,80}"))) { "图片会话无效" }
@@ -245,6 +320,7 @@ class EngineService : Service() {
     }
 
     private fun emit(event: JSONObject, persist: Boolean = true) {
+        if (event.optString("type") in setOf("result", "error", "cancelled", "interrupted")) releaseWakeLock()
         val safe = if (persist && taskStart != null && event.optString("taskId") == taskStart?.optString("taskId")) journal.append(event) else journal.clean(event)
         if (event.optString("type") == "auth_event") loginEvent = event
         if (taskStart != null && event.optString("taskId") == taskStart?.optString("taskId") && event.optString("type") in setOf("result", "error", "cancelled", "interrupted")) taskEnded = true
@@ -271,6 +347,10 @@ class EngineService : Service() {
         if (closing) return
         if (taskStart?.optString("taskId") == taskId && !taskEnded) emit(JSONObject().put("type", "cancelled").put("taskId", taskId).put("message", "引擎已停止"))
         closing = true
+        releaseWakeLock()
+        display.close()
+        helperJob?.cancel()
+        shell.close()
         cancelled = true
         pausedTool = null
         toolJob?.cancel()
@@ -289,6 +369,10 @@ class EngineService : Service() {
             emit(JSONObject().put("type", "interrupted").put("taskId", it.getString("taskId")).put("message", result.detail.ifEmpty { "引擎已停止" }))
         }
         closing = true
+        releaseWakeLock()
+        display.close()
+        helperJob?.cancel()
+        shell.close()
         handler.removeCallbacksAndMessages(null)
         publish(result)
         stopForeground(STOP_FOREGROUND_REMOVE)
@@ -307,6 +391,9 @@ class EngineService : Service() {
     }
 
     override fun onDestroy() {
+        releaseWakeLock()
+        display.close()
+        shell.close()
         writer?.close()
         scope.cancel()
         handler.removeCallbacksAndMessages(null)

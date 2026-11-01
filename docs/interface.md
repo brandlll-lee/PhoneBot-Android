@@ -12,6 +12,8 @@ Render intermediate text and final replies with the same native Markdown compone
 
 Use the empty state to show the product name. Keep model selection above the composer at the left. Use an outlined rounded button with the model name and a down arrow. Truncate long names. Reuse the Pi catalog and stored default. Provide a model-service management entry in the dropdown.
 
+Place the screen selector beside the model selector. It shows Main screen or Virtual display. Its menu opens conversation settings. Disable virtual-display selection below Android 14. Disable selection changes during a task.
+
 Use a compact rounded input for short text. For wrapped or multiline text, expand the same panel upward. Put text above the Send control. Keep Send at the bottom right. Show at most five lines and scroll the text area vertically beyond that limit. Keep only Send, or Stop during execution, inside the panel. Put one muted hint below it. When submission succeeds, clear the text, remove focus, hide the keyboard, and restore the compact height. A rejected submission keeps the draft and focus.
 
 Use short state messages for loading, execution ended, failure, permission pauses, and interruption. The final reply explains task outcomes and unresolved goals. Show only thinking blocks returned by the provider. A model that returns none has no thinking entry.
@@ -26,7 +28,15 @@ Use one tall sheet with a centered title, back navigation, and Close. Group rela
 
 Only add a secondary label when it adds useful context. Permission purposes and Android connection status provide required information. Establish other hierarchy with font size, weight, spacing, and alignment.
 
-The permission page includes modify-system-settings access and Shizuku authorization. Recheck on resume and after the Shizuku permission response. Missing optional access must not block unrelated tools.
+Conversation settings choose the helper and screen for the current conversation. New conversations inherit the saved global defaults. Existing conversations retain their choices. Old records use the main screen and Shizuku. Save these fields with the existing chat data. Device authorization stays separate from conversation choices. Basic main-screen tools do not require a helper.
+
+The device helper page shows the actual connection state. It offers built-in ADB pairing, reconnect, forget and opt-in reboot recovery. The pairing form accepts the port from Android's pairing-code dialog and a six-digit code. Pairing and connection ports are different. PhoneBot discovers the connection port. Keep the pairing code in transient UI memory. Clear it on submission and after successful pairing. The built-in helper requires Android 12 or later.
+
+The same page opens Shizuku or requests its authorization. Both helpers share device access across conversations. Reboot recovery depends on granted system access, Wireless debugging, Wi-Fi and background restrictions. Display the actual outcome. Do not show a saved pairing as a running connection.
+
+The permission page includes modify-system-settings access, Shizuku authorization and Android 17 local network access. Recheck on resume and after the Shizuku permission response. Missing optional access must not block unrelated tools.
+
+Permission pauses identify accessibility, unlock, built-in helper, Shizuku or the target screen. Show the engine's reason and a relevant settings entry. Let users repair a connection during a pause. Keep the task's selected helper and screen fixed. Continue only after the user presses Continue. Screen-off availability follows device validation; the UI must not imply universal support.
 
 ## Task notifications
 

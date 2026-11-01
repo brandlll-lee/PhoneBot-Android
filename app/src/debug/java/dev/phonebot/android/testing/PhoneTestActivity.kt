@@ -7,6 +7,7 @@ import android.content.Intent
 import android.provider.Settings
 import android.os.Bundle
 import android.view.View
+import android.view.accessibility.AccessibilityNodeInfo
 import android.widget.Button
 import android.widget.EditText
 import android.widget.LinearLayout
@@ -14,11 +15,17 @@ import android.widget.TextView
 
 @SuppressLint("SetTextI18n")
 class PhoneTestActivity : Activity() {
+    @SuppressLint("AppCompatCustomView")
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         val layout = LinearLayout(this).apply { id = android.R.id.list; orientation = LinearLayout.VERTICAL; setPadding(40, 120, 40, 40); setBackgroundColor(0xFFFFFFFF.toInt()) }
         layout.addView(TextView(this).apply { text = "PhoneBot 中文测试 Hello"; textSize = 24f; setTextColor(0xFF111111.toInt()) })
-        layout.addView(EditText(this).apply { id = android.R.id.edit; hint = "输入文字"; contentDescription = "中文输入框"; setTextColor(0xFF111111.toInt()); setHintTextColor(0xFF666666.toInt()) })
+        layout.addView(object : EditText(this) {
+            override fun performAccessibilityAction(action: Int, arguments: Bundle?): Boolean =
+                if (intent.getBooleanExtra("pasteInput", false) && action == AccessibilityNodeInfo.ACTION_SET_TEXT) false
+                else super.performAccessibilityAction(action, arguments)
+        }.apply { id = android.R.id.edit; hint = "输入文字"; contentDescription = "中文输入框"; setTextColor(0xFF111111.toInt()); setHintTextColor(0xFF666666.toInt())
+            if (intent.getBooleanExtra("pasteInput", false)) setText("已有文字") })
         val result = TextView(this).apply { text = "等待点击"; textSize = 22f; setTextColor(0xFF111111.toInt()) }
         layout.addView(Button(this).apply { text = "确认点击"; setOnClickListener { result.text = "点击成功" } })
         layout.addView(result)

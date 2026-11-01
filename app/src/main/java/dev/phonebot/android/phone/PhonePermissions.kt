@@ -24,17 +24,18 @@ object PhonePermissions {
             PhonePermission("accessibility", "无障碍服务", "读取页面、点击、滑动和输入文字", enabled, true),
             PhonePermission("unlock", "屏幕解锁", "在亮屏且解锁的主屏执行任务", !context.getSystemService(KeyguardManager::class.java).isKeyguardLocked, true),
             PhonePermission("write_settings", "修改系统设置", "设置屏幕亮度并读取实际结果", Settings.System.canWrite(context), false),
-            PhonePermission("shizuku", "系统命令", "通过已启动的 Shizuku 执行授权系统命令", runCatching { Shizuku.pingBinder() && Shizuku.checkSelfPermission() == PackageManager.PERMISSION_GRANTED }.getOrDefault(false), false),
+            PhonePermission("shizuku", "Shizuku 授权", "选择 Shizuku 时提供系统命令和虚拟屏能力", runCatching { Shizuku.pingBinder() && Shizuku.checkSelfPermission() == PackageManager.PERMISSION_GRANTED }.getOrDefault(false), false),
             PhonePermission("notifications", "通知权限", "显示任务结果、引擎状态和停止入口", context.getSystemService(NotificationManager::class.java).areNotificationsEnabled(), false),
             PhonePermission("task_results", "任务结果横幅", "任务结束时弹出提醒，点击返回对应任务", context.getSystemService(NotificationManager::class.java).let { manager ->
                 manager.areNotificationsEnabled() && (manager.getNotificationChannel(TaskNotifications.CHANNEL)?.importance ?: NotificationManager.IMPORTANCE_HIGH) >= NotificationManager.IMPORTANCE_HIGH
             }, false),
-        )
+        ) + if (Build.VERSION.SDK_INT >= 37) listOf(PhonePermission("local_network", "本地网络", "发现并连接本机无线调试服务", context.checkSelfPermission("android.permission.ACCESS_LOCAL_NETWORK") == PackageManager.PERMISSION_GRANTED, false)) else emptyList()
     }
     fun settings(context: Context, id: String): Intent = when (id) {
         "accessibility" -> Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)
         "write_settings" -> Intent(Settings.ACTION_MANAGE_WRITE_SETTINGS, "package:${context.packageName}".toUri())
         "shizuku" -> context.packageManager.getLaunchIntentForPackage("moe.shizuku.privileged.api") ?: Intent(Settings.ACTION_APPLICATION_SETTINGS)
+        "local_network" -> Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, "package:${context.packageName}".toUri())
         "notifications" -> Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).putExtra(Settings.EXTRA_APP_PACKAGE, context.packageName)
         "task_results" -> {
             TaskNotifications.channel(context)

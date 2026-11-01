@@ -61,6 +61,7 @@ for (const entry of ["src/main.mjs", "dist/engine.mjs"]) {
       { reasoning_content: "先读取工具返回的真实音量。", content: "我先调整媒体音量。", ...call("volume", "volume_set", { percent: 55 }) }, { content: "媒体音量已设为 8/15。" },
       { content: "在的。" },
       call("launch", "app_launch", { package: "missing.app" }), { content: "手机上没有找到该应用。" },
+      { content: "我将在独立屏幕处理任务。" },
     ] });
     t.after(fixture.close);
     const host = engine(t, entry, fixture.baseUrl);
@@ -118,6 +119,11 @@ for (const entry of ["src/main.mjs", "dist/engine.mjs"]) {
     for (const task of [result, chat, unavailable]) {
       assert.equal(host.seen.filter((e) => e.taskId === task.taskId && ["result", "error", "cancelled"].includes(e.type)).length, 1);
     }
+    host.send({ type: "task", session: "conversation", provider: "deepseek", model: "deepseek-flash", screen: "virtual", prompt: "使用独立屏幕" });
+    assert.equal((await host.next("result")).text, "我将在独立屏幕处理任务。");
+    assert.match(fixture.messages.find((m) => m.role === "system").content, /session's Android virtual display/);
+    assert.deepEqual(fixture.payload.tools, tools);
+    await host.next("idle");
   });
 
   test(`${entry}: Pi makes two HTTP requests and consumes the host tool result`, async (t) => {

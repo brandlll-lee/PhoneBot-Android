@@ -52,11 +52,11 @@ The system prompt directs Pi to choose entry points from the current page. It us
 
 Actions return a diff against the last presented snapshot. Diffs name `baseSnapshot` and contain added, removed, and updated elements. A window change or major replacement returns a full snapshot. Explicit reads return full snapshots. The model must request a full read if its baseline is absent.
 
-`screenshot` uses Android's accessibility screenshot API. Bundled ML Kit recognizers supply Chinese and Latin OCR. The engine initializes ML Kit explicitly. OCR removes text already present in the tree. Bitmap ownership lasts until each ML Kit task completes. OCR uses the source frame. Model images use JPEG quality 80 with a longest edge of at most 1280 pixels. Rotation changes during capture require a new read. Images stay in private files and reach Pi as image blocks for vision models. The default prompt prefers the tree, then OCR, then images when visual evidence is needed.
+`screenshot` captures the selected display. Main-screen capture uses Android's accessibility API. Virtual-screen capture uses an `ImageReader`. Both sources use the same bundled Chinese/Latin OCR, JPEG quality 80, 1280-pixel limit, coordinate mapping and image budget. The engine initializes ML Kit explicitly. OCR removes text already present in the tree. Bitmap ownership lasts until each ML Kit task completes. Rotation changes during capture require a new read. Images stay in private files and reach Pi as image blocks for vision models.
 
-`PhoneActions` executes single actions and `do_steps` through the same action, wait, and check path. App launch uses a launch intent. Tap prefers a node action, with a gesture fallback. Input uses `ACTION_SET_TEXT` or the Android 13+ accessibility input connection and checks read-back. Back and Home use global actions.
+`PhoneActions` executes single actions and `do_steps` through the same action, wait, and check path. Tap prefers a node action. Main-screen gestures use accessibility. Virtual-screen gestures and Back/Home keys carry their display ID through the helper. Input prefers `ACTION_SET_TEXT`. The main-screen fallback uses Android 13+ accessibility input. The virtual fallback focuses the target node, selects existing text, and pastes through a display-targeted key. It restores the prior clipboard if it still owns the inserted value. Both paths check read-back.
 
-`ScreenState` reads the active application window, with a focused-window fallback. A missing root returns `treeReadable:false`, an empty element list, display geometry, and window metadata. It does not throw. Screenshot capture, global actions, app launch, and coordinate gestures do not need a root node. Node-targeted actions still need a unique live target. Every observation carries `taskId` and `observedAt`. A service that connects during a permission pause joins the current task before executing its next tool.
+`ScreenState` reads application windows from the selected display. Its geometry, element identity, diffs and quiet-event checks use that display. Only main-screen reads can fall back to `rootInActiveWindow`. A missing root returns `treeReadable:false`, an empty element list, display geometry, and window metadata. Screenshot capture, navigation, app launch and coordinate gestures do not need a root node. Node-targeted actions still need a unique live target. Every observation carries `taskId`, `observedAt` and `geometry.displayId`.
 
 Actions accept an optional `expect` condition and `timeoutMs`. Conditions match package, element ID, exact text, resource ID, editable/enabled/selected/checked state, ancestor resource ID (`withinResourceId`), or absence. Text conditions default to non-editable nodes. Set `editable:true` for an input check. Select destination content, a selected tab, or a result region for navigation. A label that exists on both pages cannot identify the destination. Conditions describe the current action's direct result.
 
@@ -68,13 +68,37 @@ Actions accept an optional `expect` condition and `timeoutMs`. Conditions match 
 
 `PhoneSystem` runs separately from accessibility-based actions. `device_status` returns actual media volume and mute state, brightness mode and value, Wi-Fi state, local time zone, observation time, and shell availability. `volume_set` uses `AudioManager`. `brightness_set` validates its arguments before changing `Settings.System` and requires `canWrite`. Both return actual values after the write.
 
-`wifi_toggle` uses `svc wifi` through an authorized Shizuku user service and waits for the actual Wi-Fi state. Without that connection, it opens the Android Wi-Fi panel, or Wi-Fi settings on API 28. An opened panel returns `verified:false`.
+`wifi_toggle` uses `svc wifi` through the session's selected helper and waits for the actual Wi-Fi state. Without that connection, it opens the Android Wi-Fi panel, or Wi-Fi settings on API 28. An opened panel returns `verified:false`. Device volume, brightness, network, app data and raw shell commands remain device-wide.
 
 `phone_set_alarm`, `phone_set_timer`, and `phone_add_calendar_event` use standard clock and calendar intents. They return `opened` and `verified:false`. The agent must inspect and confirm the resulting state. Android can require user confirmation or have no app for the requested action.
 
 `PhoneIntents` validates actions, URI schemes, target packages, and scalar extras before dispatch. `app_send_intent` accepts an Android action. `phone_open_link` accepts supported links or a listed standard settings action. App-detail settings require a `package:` URI. No activity is started for invalid arguments.
 
-`PhoneShell` uses Shizuku API/provider 13.1.5. The application sets each process's provider role before provider creation. The engine requests the main process's binder. The exported binder provider requires `INTERACT_ACROSS_USERS_FULL`. The user starts Shizuku and grants access through the permission page. A command binds a non-daemon user service, waits up to ten seconds for connection, and removes its callback after execution. Shizuku reuses the service across commands and stops it when its owning app process dies. The service runs `/system/bin/sh -c` under the connection's shell/root UID. Execution has a ten-second limit. Output is drained and capped at 32768 characters. Cancellation terminates the active child; service destruction ends its process. Commands already dispatched to Android can have lasting effects. A zero exit code establishes command success, not the requested setting's state.
+`PhoneShell` returns one `ISystemShell` interface for built-in ADB and Shizuku. `SystemShellService` owns commands, virtual displays and input dispatch. Shell commands have a ten-second limit and a 32768-character output cap. Cancellation terminates the child. Destruction releases displays and ends the helper process. Command success does not establish a setting's state.
+
+## Session screens and helpers
+
+`ChatSession` saves `helper` and `screen` in the existing chat file. New sessions inherit saved defaults. Existing records default to Shizuku and main screen. Task start fixes the session's selection. The UI cannot change it during execution. Task events record the selected helper, mode and actual display ID. Pi receives the current screen mode in its system prompt.
+
+`PhoneDisplay` owns one lazy virtual display for the active session. It needs Android 14 or later. The shell creates a trusted display with independent focus, no top-focus stealing, local IME and its own display group. Launch intents carry `ActivityOptions.setLaunchDisplayId`. A target app already visible on the main screen is rejected. If a virtual task moves to the main screen, later phone actions pause for user review. The virtual path does not fall back to main. Session/configuration changes and engine shutdown release the display. Helper death invalidates its Binder and the display. Recovery creates a fresh display; old element IDs are not reused.
+
+The display's Binder death handler closes its ImageReader and frame thread. Cancellation during creation closes the new display before returning. ML Kit initializes once in the engine application's startup. Accessibility reconnection creates recognizers as needed and closes them on service destruction.
+
+Main-screen tools need an unlocked, interactive phone. Virtual-screen tools check the target display and helper instead. A virtual task holds a bounded partial CPU wake lock. Permission pauses, cancellation and terminal events release it. This lock does not keep the physical panel on. It does not exempt the app from Doze or vendor network restrictions.
+
+### Built-in ADB
+
+Android 12+ supplies the platform TLS exporter. Pairing uses TLS 1.3, SPAKE2 and AES-GCM on a loopback socket. Pairing and connection ports are separate. NSD resolves this device's service; a saved connection port can be retried. Pairing codes stay in memory. The RSA identity is encrypted with an Android Keystore AES key in `noBackupFilesDir`.
+
+ADB uses self-signed certificates rather than web PKI. Pairing authenticates the code with the TLS exporter and SPAKE2. Subsequent ADB connections authenticate the saved client public key. The implementation only accepts loopback addresses and checks the self-signed certificate's signature. It does not use the app's cloud TLS policy.
+
+Bootstrap passes a fresh nonce over stdin. The helper checks the installed APK signature. Its exported provider requires `INTERACT_ACROSS_USERS_FULL`. Handoff verifies shell UID/PID, current APK path, one-time nonce and Binder identity. The owner Binder's death ends the helper. App updates must start a helper from the new APK.
+
+State distinguishes unpaired, permission required, wireless debugging off, connecting, ready and disconnected/error. Binder death, network availability and wireless-debugging changes trigger bounded recovery. No recurring polling runs. Android 17 requires local-network runtime permission. Optional boot recovery needs saved pairing, Wi-Fi, wireless debugging and user-approved `WRITE_SECURE_SETTINGS`. It attempts recovery within a bounded broadcast window. Android can still reclaim an idle app process.
+
+### Shizuku
+
+Shizuku API/provider 13.1.5 supplies the other transport. The application sets each process's provider role before provider creation. The engine requests the main process's Binder. The user starts Shizuku and grants access. A non-daemon user service stays bound across commands and virtual-screen operations. It ends with its owner or explicit engine shutdown.
 
 ## Task completion
 
@@ -137,6 +161,11 @@ Pi 1.4.0's [Agent initialization](https://github.com/earendil-works/pi/blob/v1.4
 - [Settings.System](https://developer.android.com/reference/android/provider/Settings.System): brightness values, modes, and write authorization.
 - [WifiManager](https://developer.android.com/reference/android/net/wifi/WifiManager): Wi-Fi state and restrictions on direct toggling.
 - [Shizuku API](https://github.com/RikkaApps/Shizuku-API): binder permissions, multiprocess support, user-service lifecycle, and destroy transaction.
+- [ADB Wi-Fi protocol](https://android.googlesource.com/platform/packages/modules/adb/+/refs/heads/main/docs/dev/adb_wifi.md): pairing, TLS identity, discovery and separate ports.
+- [Android TLS exporter](https://developer.android.com/reference/android/net/ssl/SSLSockets): platform keying-material export from API 31.
+- [Multi-display launch](https://source.android.com/docs/core/display/multi_display/activity-launch): launch options and task placement.
+- [Local network permission](https://developer.android.com/privacy-and-security/local-network-permission): Android 17 runtime authorization.
+- [Doze and App Standby](https://developer.android.com/training/monitoring-device-state/doze-standby): power and network limits after screen-off.
 - [Compose text input](https://developer.android.com/develop/ui/compose/text/user-input): text field line limits, IME actions, and input behavior.
 - [Display geometry](https://developer.android.com/reference/android/view/Display#getRealSize(android.graphics.Point)): rotated logical display bounds and the distinction from UI window metrics.
 - [Accessibility input method](https://developer.android.com/reference/android/accessibilityservice/InputMethod): Android 13+ input connection.

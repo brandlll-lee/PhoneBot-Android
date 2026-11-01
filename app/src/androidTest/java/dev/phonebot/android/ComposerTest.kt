@@ -9,6 +9,7 @@ import androidx.activity.ComponentActivity
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.SideEffect
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalDensity
@@ -20,6 +21,25 @@ import org.junit.Test
 
 class ComposerTest {
     @get:Rule val compose = createAndroidComposeRule<ComponentActivity>()
+
+    @androidx.test.filters.SdkSuppress(minSdkVersion = 34)
+    @Test fun screenSelectionChangesAndLocksDuringExecution() {
+        val current = mutableStateOf("main")
+        val enabled = mutableStateOf(true)
+        var settings = false
+        compose.setContent { PhoneBotTheme {
+            ScreenSelector(current.value, enabled.value, { current.value = it }, { settings = true })
+        } }
+        compose.onNodeWithContentDescription("选择屏幕").performClick()
+        compose.onNodeWithText("虚拟屏幕").performClick()
+        compose.runOnIdle { assertEquals("virtual", current.value) }
+        compose.onNodeWithText("虚拟屏幕").assertExists()
+        compose.onNodeWithContentDescription("选择屏幕").performClick()
+        compose.onNodeWithText("会话设置").performClick()
+        assertTrue(settings)
+        compose.runOnIdle { enabled.value = false }
+        compose.onNodeWithTag("screen_selector").assertIsNotEnabled()
+    }
 
     @Test fun composerExpandsCapsAndCollapsesAfterAcceptedSend() {
         compose.activityRule.scenario.onActivity {

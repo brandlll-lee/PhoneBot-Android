@@ -74,7 +74,7 @@ class EngineClient(private val context: Context) {
     }
 
     private fun send(command: JSONObject) {
-        val control = command.optString("type") in setOf("cancel", "tool_result", "resume")
+        val control = command.optString("type") in setOf("cancel", "tool_result", "resume", "helper", "phone_select")
         if (!mutableState.value.canRun && !control) return
         try {
             checkNotNull(remote) { "Engine is disconnected" }.send(Message.obtain(null, EngineIpc.COMMAND).apply {

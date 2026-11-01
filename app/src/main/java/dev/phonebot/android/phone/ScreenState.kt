@@ -13,8 +13,8 @@ import org.json.JSONObject
 
 internal fun Rect.json() = JSONArray(listOf(left, top, right, bottom))
 
-internal data class ScreenGeometry(val width: Int, val height: Int, val rotation: Int, val window: Rect, val content: Rect) {
-    fun json(): JSONObject = JSONObject().put("displayId", Display.DEFAULT_DISPLAY).put("rotation", rotation)
+internal data class ScreenGeometry(val width: Int, val height: Int, val rotation: Int, val window: Rect, val content: Rect, val displayId: Int = Display.DEFAULT_DISPLAY) {
+    fun json(): JSONObject = JSONObject().put("displayId", displayId).put("rotation", rotation)
         .put("fullBounds", Rect(0, 0, width, height).json()).put("windowBounds", window.json()).put("contentBounds", content.json())
     fun point(x: Double, y: Double): Pair<Float, Float> {
         require(x.isFinite() && y.isFinite() && x == x.toInt().toDouble() && y == y.toInt().toDouble() && x >= 0 && x < width && y >= 0 && y < height) { "坐标超出屏幕" }
@@ -22,21 +22,22 @@ internal data class ScreenGeometry(val width: Int, val height: Int, val rotation
     }
     companion object {
         @Suppress("DEPRECATION")
-        fun read(service: AccessibilityService, root: AccessibilityNodeInfo? = null): ScreenGeometry {
-            val display = checkNotNull(service.getSystemService(DisplayManager::class.java).getDisplay(Display.DEFAULT_DISPLAY))
+        fun read(service: AccessibilityService, root: AccessibilityNodeInfo? = null, displayId: Int = Display.DEFAULT_DISPLAY, windows: List<AccessibilityWindowInfo> = service.windows): ScreenGeometry {
+            val display = checkNotNull(service.getSystemService(DisplayManager::class.java).getDisplay(displayId)) { "执行屏幕已断开" }
             // Gesture coordinates use the rotated logical display, including system bars.
             val size = Point().also(display::getRealSize)
             val full = Rect(0, 0, size.x, size.y)
-            val window = Rect().also { out -> service.windows.firstOrNull { it.id == root?.windowId }?.getBoundsInScreen(out) }
+            val window = Rect().also { out -> windows.firstOrNull { it.id == root?.windowId }?.getBoundsInScreen(out) }
             if (!window.intersect(full)) window.set(full)
             val content = Rect().also { root?.getBoundsInScreen(it) }
             if (!content.intersect(window)) content.set(window)
-            return ScreenGeometry(size.x, size.y, display.rotation, window, content)
+            return ScreenGeometry(size.x, size.y, display.rotation, window, content, displayId)
         }
     }
 }
 
 internal class ScreenState(private val service: AccessibilityService) {
+    var displayId = Display.DEFAULT_DISPLAY
     private data class Entry(val id: String, val node: AccessibilityNodeInfo, val key: String, val unique: String?, val value: JSONObject)
     private var issued = 0L
     private var sequence = 0L
@@ -55,13 +56,13 @@ internal class ScreenState(private val service: AccessibilityService) {
         "$ancestry|${node.className}|${node.viewIdResourceName}|${if (node.isPassword) "" else node.contentDescription?.toString()?.take(120).orEmpty()}|${if (node.isEditable || node.isPassword) "" else node.text?.toString()?.take(120).orEmpty()}"
 
     fun scan(): JSONObject {
-        val windows = runCatching { service.windows }.getOrDefault(emptyList())
+        val windows = runCatching { if (Build.VERSION.SDK_INT >= 30) service.windowsOnAllDisplays.get(displayId).orEmpty() else service.windows }.getOrDefault(emptyList())
         root = windows.filter { it.type == AccessibilityWindowInfo.TYPE_APPLICATION }
             .sortedByDescending { if (it.isActive) 2 else if (it.isFocused) 1 else 0 }
-            .firstNotNullOfOrNull { it.root } ?: runCatching { service.rootInActiveWindow }.getOrNull()
+            .firstNotNullOfOrNull { it.root } ?: if (displayId == Display.DEFAULT_DISPLAY) runCatching { service.rootInActiveWindow }.getOrNull() else null
         val root = root
-        geometry = ScreenGeometry.read(service, root)
-        val nextScope = "${root?.packageName}:${root?.windowId}:${geometry.width}:${geometry.height}:${geometry.rotation}"
+        geometry = ScreenGeometry.read(service, root, displayId, windows)
+        val nextScope = "$displayId:${root?.packageName}:${root?.windowId}:${geometry.width}:${geometry.height}:${geometry.rotation}"
         if (scope != nextScope) { reset(); scope = nextScope }
         val collected = mutableListOf<Triple<AccessibilityNodeInfo, String, Int?>>()
         fun visit(node: AccessibilityNodeInfo, ancestry: String, parentIndex: Int?) {

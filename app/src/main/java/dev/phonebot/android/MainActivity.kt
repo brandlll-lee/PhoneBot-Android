@@ -3,6 +3,7 @@ package dev.phonebot.android
 import android.content.Intent
 import androidx.core.net.toUri
 import android.os.Bundle
+import android.os.Build
 import android.graphics.BitmapFactory
 import androidx.compose.foundation.Image
 import androidx.activity.ComponentActivity
@@ -56,6 +57,7 @@ import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
@@ -120,6 +122,9 @@ private val Accent = Color(0xFF88ABFF)
     }
     val context = LocalContext.current
     val lifecycle = LocalLifecycleOwner.current.lifecycle
+    LaunchedEffect(panel, engine.canRun) {
+        if (panel == "helpers" && engine.canRun) model.helperCommand("status")
+    }
     DisposableEffect(lifecycle) {
         val observer = LifecycleEventObserver { _, event -> if (event == Lifecycle.Event.ON_RESUME) model.refreshPermissions() }
         val permissionResult = Shizuku.OnRequestPermissionResultListener { _, _ -> scope.launch { model.refreshPermissions() } }
@@ -200,14 +205,25 @@ private val Accent = Color(0xFF88ABFF)
                 if (model.permission.isNotEmpty()) {
                     val required = model.permissions.find { it.id == model.permission }
                     Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp).clip(RoundedCornerShape(16.dp)).background(Group).padding(16.dp)) {
-                        Text(if (model.permission == "accessibility") "任务已暂停：需要无障碍服务" else "任务已暂停：请亮屏并解锁", fontWeight = FontWeight.Medium)
+                        Text(when (model.permission) {
+                            "accessibility" -> "任务已暂停：需要无障碍服务"
+                            "unlock" -> "任务已暂停：请亮屏并解锁"
+                            "builtin" -> "任务已暂停：请连接内置助手"
+                            "shizuku" -> "任务已暂停：请启动并授权 Shizuku"
+                            "screen" -> "任务已暂停：目标屏幕不可用"
+                            else -> "任务已暂停：请检查助手和屏幕"
+                        }, fontWeight = FontWeight.Medium)
+                        if (model.permissionMessage.isNotBlank()) Text(model.permissionMessage, color = Muted, fontSize = 14.sp, modifier = Modifier.padding(top = 8.dp))
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            TextButton(onClick = { panel = "permissions" }) { Text("查看权限") }
-                            TextButton(onClick = model::resume, enabled = required?.granted == true) { Text("继续任务") }
+                            TextButton(onClick = {
+                                panel = if (model.permission in setOf("accessibility", "unlock")) "permissions" else "helpers"
+                                if (panel == "helpers") model.helperCommand("status", model.session?.helper ?: "shizuku")
+                            }) { Text(if (model.permission in setOf("builtin", "shizuku", "screen")) "设备助手" else "查看权限") }
+                            TextButton(onClick = model::resume, enabled = required?.granted != false) { Text("继续任务") }
                         }
                     }
                 }
-                Composer(model, engine.phase, { panel = "providers"; if (engine.canRun) model.catalog() })
+                Composer(model, engine.phase, { panel = "providers"; if (engine.canRun) model.catalog() }, { panel = "session" })
             }
         }
     }
@@ -220,6 +236,8 @@ private val Accent = Color(0xFF88ABFF)
                     panel == "settings" -> "设置"
                     panel == "providers" -> "模型服务"
                     panel == "permissions" -> "权限"
+                    panel == "session" -> "会话设置"
+                    panel == "helpers" -> "设备助手"
                     else -> model.providers.find { it.id == providerId }?.name ?: providerId
                 }
                 Row(Modifier.fillMaxWidth().padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -233,6 +251,10 @@ private val Accent = Color(0xFF88ABFF)
                             SettingsRow(Icons.Outlined.AccountCircle, "模型服务", model.providers.find { it.id == model.provider }?.name.orEmpty()) { panel = "providers"; model.catalog() }
                             InsetDivider()
                             SettingsRow(Icons.Outlined.Lock, "权限", "${model.permissions.count { it.granted }}/${model.permissions.size}") { model.refreshPermissions(); panel = "permissions" }
+                            InsetDivider()
+                            SettingsRow(Icons.Outlined.Settings, "会话设置") { panel = "session" }
+                            InsetDivider()
+                            SettingsRow(Icons.Outlined.Settings, "设备助手") { panel = "helpers"; model.helperCommand("status") }
                         }
                         SettingsGroup {
                             SettingsRow(Icons.Outlined.PlayArrow, "引擎", phaseName(engine.phase), arrow = false) {}
@@ -246,12 +268,36 @@ private val Accent = Color(0xFF88ABFF)
                         SettingsGroup { SettingsRow(Icons.Outlined.Info, "版本", "0.2.0", arrow = false) {} }
                     }
                     panel == "providers" -> ProviderList(model, engine.canRun) { id -> panel = "provider:$id"; model.catalog(id) }
+                    panel == "session" -> Column(Modifier.verticalScroll(rememberScrollState()).padding(18.dp), verticalArrangement = Arrangement.spacedBy(24.dp)) {
+                        val current = model.session
+                        val enabled = model.activeTask.isEmpty()
+                        SettingsGroup {
+                            listOf("builtin" to "内置助手", "shizuku" to "Shizuku").forEachIndexed { index, (id, label) ->
+                                if (index > 0) InsetDivider()
+                                SettingsRow(Icons.Outlined.Settings, label, if (current?.helper == id) "已选择" else "", enabled = enabled, arrow = false) { model.choosePhone(helper = id) }
+                            }
+                        }
+                        SettingsGroup {
+                            listOf("main" to "主屏幕", "virtual" to "虚拟屏幕").forEachIndexed { index, (id, label) ->
+                                if (index > 0) InsetDivider()
+                                SettingsRow(Icons.Outlined.Settings, label, if (current?.screen == id) "已选择" else "", enabled = enabled && (id == "main" || Build.VERSION.SDK_INT >= 34), arrow = false) { model.choosePhone(screen = id) }
+                            }
+                        }
+                        SettingsGroup {
+                            SettingsRow(Icons.Outlined.Check, "设为新会话默认配置", enabled = enabled) { model.savePhoneDefaults() }
+                            InsetDivider()
+                            SettingsRow(Icons.Outlined.Lock, "连接和授权") { panel = "helpers"; model.helperCommand("status") }
+                        }
+                    }
+                    panel == "helpers" -> HelperSettings(model, engine.canRun)
                     panel == "permissions" -> Column(Modifier.verticalScroll(rememberScrollState()).padding(18.dp), verticalArrangement = Arrangement.spacedBy(24.dp)) {
                         model.permissions.forEach { permission ->
                             SettingsGroup {
                                 SettingsRow(if (permission.id in setOf("notifications", "task_results")) Icons.Outlined.Notifications else Icons.Outlined.Lock, permission.name, if (permission.granted) "已开启" else "待授权") {
                                     if (permission.id == "notifications" && PhonePermissions.notificationPermission() != null && !permission.granted)
                                         (context as? ComponentActivity)?.requestPermissions(arrayOf(PhonePermissions.notificationPermission()!!), 1)
+                                    else if (permission.id == "local_network" && !permission.granted)
+                                        (context as? ComponentActivity)?.requestPermissions(arrayOf("android.permission.ACCESS_LOCAL_NETWORK"), 3)
                                     else if (permission.id == "shizuku" && Shizuku.pingBinder() && !permission.granted) Shizuku.requestPermission(2)
                                     else context.startActivity(PhonePermissions.settings(context, permission.id))
                                 }
@@ -284,15 +330,91 @@ private val Accent = Color(0xFF88ABFF)
     }
 }
 
-@Composable private fun Composer(model: PhoneBotModel, phase: EnginePhase, chooseModel: () -> Unit) {
+@Composable internal fun ScreenSelector(screen: String, enabled: Boolean, choose: (String) -> Unit, configure: () -> Unit) {
+    var expanded by remember { mutableStateOf(false) }
+    Box {
+        OutlinedButton(onClick = { expanded = true }, enabled = enabled, shape = RoundedCornerShape(16.dp),
+            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant), contentPadding = PaddingValues(horizontal = 12.dp, vertical = 10.dp),
+            modifier = Modifier.heightIn(min = 48.dp).testTag("screen_selector")) {
+            Text(if (screen == "virtual") "虚拟屏幕" else "主屏幕", fontSize = 14.sp)
+            Icon(Icons.Outlined.KeyboardArrowDown, "选择屏幕", Modifier.padding(start = 6.dp).size(18.dp))
+        }
+        DropdownMenu(expanded, { expanded = false }) {
+            listOf("main" to "主屏幕", "virtual" to "虚拟屏幕").forEach { (id, label) ->
+                DropdownMenuItem(text = { Text(label) }, enabled = enabled && (id == "main" || Build.VERSION.SDK_INT >= 34),
+                    trailingIcon = { if (screen == id) Icon(Icons.Outlined.Check, null) }, onClick = { choose(id); expanded = false })
+            }
+            HorizontalDivider()
+            DropdownMenuItem(text = { Text("会话设置") }, onClick = { expanded = false; configure() })
+        }
+    }
+}
+
+@Composable private fun HelperSettings(model: PhoneBotModel, ready: Boolean) {
+    val context = LocalContext.current
+    var port by remember { mutableStateOf("") }
+    var code by remember { mutableStateOf("") }
+    val enabled = model.activeTask.isEmpty() || model.permission.isNotEmpty()
+    val builtinEnabled = enabled && Build.VERSION.SDK_INT >= 31
+    val state = model.helperStates["builtin"]
+    LaunchedEffect(state) { if (state?.optBoolean("paired") == true || state?.optString("state") in setOf("ready", "running")) code = "" }
+    val network = model.permissions.firstOrNull { it.id == "local_network" }
+    Column(Modifier.verticalScroll(rememberScrollState()).padding(18.dp), verticalArrangement = Arrangement.spacedBy(18.dp)) {
+        Text("连接由所有会话共享。主屏普通操作只需无障碍权限。", color = Muted, fontSize = 14.sp)
+        SettingsGroup {
+            SettingsRow(Icons.Outlined.Settings, "内置助手", helperStateName(state?.optString("state")), arrow = false) {}
+        }
+        state?.optString("message")?.takeIf { it.isNotBlank() }?.let { Text(it, color = Muted, fontSize = 14.sp) }
+        if (Build.VERSION.SDK_INT < 31) Text("内置助手需要 Android 12 及以上。", color = Muted, fontSize = 14.sp)
+        if (network != null && !network.granted) {
+            OutlinedButton(onClick = { (context as? ComponentActivity)?.requestPermissions(arrayOf("android.permission.ACCESS_LOCAL_NETWORK"), 3) }) { Text("允许本地网络访问") }
+        }
+        OutlinedButton(onClick = { context.startActivity(Intent(android.provider.Settings.ACTION_APPLICATION_DEVELOPMENT_SETTINGS)) }) { Text("打开无线调试设置") }
+        OutlinedTextField(port, { value -> port = value.filter(Char::isDigit).take(5) }, label = { Text("配对端口") },
+            singleLine = true, enabled = builtinEnabled, modifier = Modifier.fillMaxWidth(), keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number))
+        OutlinedTextField(code, { value -> code = value.filter(Char::isDigit).take(6) }, label = { Text("六位配对码") },
+            singleLine = true, enabled = builtinEnabled, modifier = Modifier.fillMaxWidth(), keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword), visualTransformation = PasswordVisualTransformation())
+        Text("在无线调试中打开“使用配对码配对设备”，填写该弹窗的端口和配对码。", color = Muted, fontSize = 13.sp)
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Button(onClick = { model.helperCommand("pair", "builtin", port.toInt(), code); code = "" },
+                enabled = builtinEnabled && (port.toIntOrNull() ?: 0) in 1..65535 && code.length == 6 && network?.granted != false) { Text("配对") }
+            OutlinedButton(onClick = { model.helperCommand("connect", "builtin") }, enabled = builtinEnabled && network?.granted != false) { Text("重新连接") }
+            TextButton(onClick = { model.helperCommand("forget", "builtin"); code = ""; port = "" }, enabled = model.activeTask.isEmpty()) { Text("解除配对") }
+        }
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            Text("重启后自动恢复", Modifier.weight(1f))
+            Switch(checked = state?.optBoolean("autoRestore") == true, onCheckedChange = { model.helperCommand("recovery", "builtin", enabled = it) }, enabled = model.activeTask.isEmpty() && ready)
+        }
+        Text("开启后允许助手配置恢复所需的系统授权。无线调试和可信 Wi-Fi 可用时尝试恢复。", color = Muted, fontSize = 13.sp)
+        SettingsGroup { SettingsRow(Icons.Outlined.Lock, "Shizuku", helperStateName(model.helperStates["shizuku"]?.optString("state")), enabled = enabled) {
+            if (Shizuku.pingBinder() && Shizuku.checkSelfPermission() != android.content.pm.PackageManager.PERMISSION_GRANTED) Shizuku.requestPermission(2)
+            else context.startActivity(PhonePermissions.settings(context, "shizuku"))
+        } }
+        TextButton(onClick = { model.helperCommand("status", "builtin"); model.helperCommand("status", "shizuku") }, enabled = enabled) { Text("刷新连接状态") }
+    }
+}
+
+private fun helperStateName(state: String?): String = when (state) {
+    "ready", "running" -> "可用"
+    "connecting" -> "连接中"
+    "not_paired" -> "未配对"
+    "permission_required" -> "待授权"
+    "wireless_debugging_off" -> "无线调试已关闭"
+    "unsupported" -> "系统不支持"
+    else -> "未连接"
+}
+
+@Composable private fun Composer(model: PhoneBotModel, phase: EnginePhase, chooseModel: () -> Unit, configurePhone: () -> Unit) {
     TaskComposer(model.model.ifEmpty { if (phase == EnginePhase.STARTING) "正在启动" else "选择模型" }, model.models.takeIf { model.modelProvider == model.provider }.orEmpty(),
         model.activeTask.isNotEmpty(), phase == EnginePhase.READY,
         { if (model.provider.isNotEmpty()) model.catalog(model.provider) },
-        { model.choose(model.provider, it) }, chooseModel, model::submit, model::cancel)
+        { model.choose(model.provider, it) }, chooseModel, model::submit, model::cancel,
+        model.session?.screen ?: "main", { model.choosePhone(screen = it) }, configurePhone)
 }
 
 @Composable internal fun TaskComposer(modelName: String, models: List<PiModel>, busy: Boolean, ready: Boolean,
-    loadModels: () -> Unit, choose: (String) -> Unit, configure: () -> Unit, submit: (String) -> Boolean, cancel: () -> Unit) {
+    loadModels: () -> Unit, choose: (String) -> Unit, configure: () -> Unit, submit: (String) -> Boolean, cancel: () -> Unit,
+    screen: String = "main", chooseScreen: (String) -> Unit = {}, configurePhone: () -> Unit = {}) {
     var input by rememberSaveable { mutableStateOf("") }
     var expanded by remember { mutableStateOf(false) }
     val focus = LocalFocusManager.current
@@ -305,7 +427,8 @@ private val Accent = Color(0xFF88ABFF)
         }
     }
     Column(Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        Box {
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+        Box(Modifier.weight(1f, fill = false)) {
             OutlinedButton(onClick = { expanded = true; loadModels() }, enabled = !busy && ready, shape = RoundedCornerShape(16.dp),
                 border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant), contentPadding = PaddingValues(horizontal = 14.dp, vertical = 10.dp),
                 modifier = Modifier.widthIn(max = 280.dp).heightIn(min = 48.dp)) {
@@ -319,6 +442,8 @@ private val Accent = Color(0xFF88ABFF)
                 HorizontalDivider()
                 DropdownMenuItem(text = { Text("管理模型服务") }, onClick = { expanded = false; configure() })
             }
+        }
+        ScreenSelector(screen, !busy, chooseScreen, configurePhone)
         }
         val style = MaterialTheme.typography.bodyLarge.copy(color = MaterialTheme.colorScheme.onSurface, fontSize = 17.sp, lineHeight = 25.sp)
         val measurer = rememberTextMeasurer()

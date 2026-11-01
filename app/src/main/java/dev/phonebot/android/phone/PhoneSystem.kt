@@ -13,7 +13,7 @@ import kotlinx.coroutines.delay
 import org.json.JSONObject
 import kotlin.math.roundToInt
 
-internal class PhoneSystem(private val context: Context, private val shell: PhoneShell) {
+internal class PhoneSystem(private val context: Context, private val shell: PhoneShell, private val display: PhoneDisplay? = null) {
     companion object {
         val tools = setOf("device_status", "volume_set", "brightness_set", "wifi_toggle", "phone_set_alarm", "phone_set_timer", "phone_add_calendar_event", "phone_system_command")
     }
@@ -25,8 +25,8 @@ internal class PhoneSystem(private val context: Context, private val shell: Phon
     private fun brightness() = JSONObject().put("value", Settings.System.getInt(resolver, Settings.System.SCREEN_BRIGHTNESS, -1))
         .put("automatic", Settings.System.getInt(resolver, Settings.System.SCREEN_BRIGHTNESS_MODE, 0) == Settings.System.SCREEN_BRIGHTNESS_MODE_AUTOMATIC)
     private fun percent(args: JSONObject): Int = args.getInt("percent").also { require(it in 0..100) { "百分比需为 0 到 100" } }
-    private fun open(intent: Intent): JSONObject {
-        context.startActivity(intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+    private suspend fun open(intent: Intent): JSONObject {
+        display?.launch(intent) ?: context.startActivity(intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
         return JSONObject().put("ok", true).put("status", "opened").put("verified", false).put("action", intent.action)
             .put("message", "已打开系统处理界面；需读取页面并确认结果")
     }
@@ -34,7 +34,7 @@ internal class PhoneSystem(private val context: Context, private val shell: Phon
     suspend fun execute(name: String, args: JSONObject): JSONObject {
         val result = when (name) {
             "device_status" -> JSONObject().put("volume", volume()).put("brightness", brightness()).put("wifiEnabled", wifi.isWifiEnabled)
-                .put("shell", shell.status()).put("timeZone", java.util.TimeZone.getDefault().id)
+                .put("shell", shell.status(display?.helper ?: "shizuku")).put("timeZone", java.util.TimeZone.getDefault().id)
             "volume_set" -> {
                 val target = (audio.getStreamMaxVolume(AudioManager.STREAM_MUSIC) * percent(args) / 100.0).roundToInt()
                 audio.setStreamVolume(AudioManager.STREAM_MUSIC, target, 0)
@@ -54,8 +54,8 @@ internal class PhoneSystem(private val context: Context, private val shell: Phon
             "wifi_toggle" -> {
                 val on = args.getBoolean("on")
                 if (wifi.isWifiEnabled == on) return JSONObject().put("ok", true).put("verified", true).put("wifiEnabled", on)
-                if (!shell.ready()) return open(Intent(if (Build.VERSION.SDK_INT >= 29) Settings.Panel.ACTION_WIFI else Settings.ACTION_WIFI_SETTINGS)).put("requestedEnabled", on)
-                val command = shell.execute("svc wifi ${if (on) "enable" else "disable"}")
+                if (!shell.ready(display?.helper ?: "shizuku")) return open(Intent(if (Build.VERSION.SDK_INT >= 29) Settings.Panel.ACTION_WIFI else Settings.ACTION_WIFI_SETTINGS)).put("requestedEnabled", on)
+                val command = shell.execute("svc wifi ${if (on) "enable" else "disable"}", display?.helper ?: "shizuku")
                 if (!command.optBoolean("ok")) return command
                 val deadline = SystemClock.elapsedRealtime() + 4000
                 while (wifi.isWifiEnabled != on && SystemClock.elapsedRealtime() < deadline) delay(100)
@@ -79,7 +79,7 @@ internal class PhoneSystem(private val context: Context, private val shell: Phon
                     .putExtra(CalendarContract.EXTRA_EVENT_BEGIN_TIME, begin).putExtra(CalendarContract.EXTRA_EVENT_END_TIME, end)
                     .putExtra(CalendarContract.Events.EVENT_LOCATION, args.optString("location")).putExtra(CalendarContract.Events.DESCRIPTION, args.optString("description")))
             }
-            "phone_system_command" -> shell.execute(args.getString("command"))
+            "phone_system_command" -> shell.execute(args.getString("command"), display?.helper ?: "shizuku")
             else -> error("系统工具不存在")
         }
         if (!result.has("ok")) result.put("ok", true)

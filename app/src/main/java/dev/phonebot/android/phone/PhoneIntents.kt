@@ -12,6 +12,10 @@ internal object PhoneIntents {
         .map { "android.settings.$it" }.toSet()
 
     fun start(context: Context, tool: String, args: JSONObject) {
+        context.startActivity(build(tool, args))
+    }
+
+    fun build(tool: String, args: JSONObject): Intent {
         val action = args.optString("action").ifEmpty { Intent.ACTION_VIEW }
         require(action.matches(Regex("[A-Za-z][A-Za-z0-9_.]+"))) { "Intent action 无效" }
         val data = args.optString("uri", args.optString("data")).takeIf(String::isNotEmpty)?.toUri()
@@ -37,6 +41,6 @@ internal object PhoneIntents {
                 else -> error("Intent extras 只接受文字、数字和布尔值")
             }
         } }
-        context.startActivity(intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+        return intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
     }
 }
