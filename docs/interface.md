@@ -40,6 +40,14 @@ The permission page includes modify-system-settings access, Shizuku authorizatio
 
 Permission pauses identify accessibility, unlock, built-in helper, Shizuku or the target screen. Show the engine's reason and a relevant settings entry. Let users repair a connection during a pause. Keep the task's selected helper and screen fixed. Continue only after the user presses Continue. Screen-off availability follows device validation; the UI must not imply universal support.
 
+## Floating task preview
+
+An active user task shows one draggable PhoneBot bubble. Tap it to open a dark rounded card with the task title, current step, Return to conversation and Stop task. Drag the bubble or the card header to move it. The window stays inside the screen. Closing the card restores the bubble and leaves the task running. Terminal events remove the window. Connection checks and journal replay do not open it.
+
+Virtual tasks show a live preview. Tap the image to enlarge it or restore its compact height. The image is read-only. Main-screen tasks show progress. The window does not take keyboard focus. Return to conversation uses the same exact-task destination as result notifications. Stop uses the existing task cancellation command.
+
+The existing accessibility service hosts the window. No separate overlay permission is required. Losing the service removes the window. Main-screen capture and gestures temporarily hide the window so it cannot cover targets or enter screenshots. It remains available during page-loading waits.
+
 ## Task notifications
 
 Post one result notification for each user task in both foreground and background. Show execution ended, failed, or stopped, with the task title and a plain-text result preview. Keep the high-importance result channel separate from the quiet engine channel. Notification taps close the drawer or settings, open the recorded session, and scroll to its task. Handle both a new activity and an existing activity. Journal replay and connection checks do not post result notifications.

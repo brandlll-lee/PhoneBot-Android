@@ -3,7 +3,10 @@ package dev.phonebot.android.phone
 import android.content.Context
 import android.content.Intent
 import android.graphics.Bitmap
+import android.graphics.Canvas
+import android.graphics.Paint
 import android.graphics.PixelFormat
+import android.graphics.Rect
 import android.hardware.display.DisplayManager
 import android.media.ImageReader
 import android.media.Image
@@ -14,6 +17,11 @@ import android.os.IBinder
 import android.view.Display
 import androidx.core.graphics.createBitmap
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.flowOn
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
@@ -24,7 +32,7 @@ internal class PhoneDisplay(private val context: Context, private val shell: Pho
     var helper = "shizuku"; private set
     var mode = "main"; private set
     var pauseReason = ""
-    private var screen: VirtualScreen? = null
+    @Volatile private var screen: VirtualScreen? = null
     val displayId get() = if (mode == "main") Display.DEFAULT_DISPLAY else screen?.id ?: Display.INVALID_DISPLAY
     val virtual get() = mode == "virtual"
 
@@ -64,6 +72,13 @@ internal class PhoneDisplay(private val context: Context, private val shell: Pho
     suspend fun key(code: Int) = withContext(Dispatchers.IO) { check(checkNotNull(screen).service.key(displayId, code)) { "系统未执行虚拟屏按键" } }
     suspend fun paste(text: String) = withContext(Dispatchers.IO) { check(checkNotNull(screen).service.paste(displayId, text)) { "虚拟屏输入失败" } }
     fun frame(): Bitmap = checkNotNull(screen).frame()
+    fun previewFrames() = flow {
+        var timestamp = Long.MIN_VALUE
+        while (currentCoroutineContext().isActive) {
+            screen?.preview(timestamp)?.let { (time, bitmap) -> timestamp = time; emit(bitmap) }
+            delay(200)
+        }
+    }.flowOn(Dispatchers.Default)
     fun close() { screen?.close(); screen = null }
 }
 
@@ -92,12 +107,20 @@ private class VirtualScreen(context: Context, val service: ISystemShell) {
     }
 
     fun alive(): Boolean = !closed.get() && service.asBinder().isBinderAlive
-    fun frame(): Bitmap = synchronized(lock) {
-        val image = checkNotNull(latest) { "虚拟屏尚未产生画面，请稍后重试" }
+    fun frame(): Bitmap = synchronized(lock) { copyFrame(checkNotNull(latest) { "虚拟屏尚未产生画面，请稍后重试" }) }
+    fun preview(timestamp: Long): Pair<Long, Bitmap>? = synchronized(lock) {
+        latest?.takeIf { it.timestamp != timestamp }?.let { it.timestamp to copyFrame(it, 360) }
+    }
+    private fun copyFrame(image: Image, maxWidth: Int = image.width): Bitmap {
         val plane = image.planes[0]
         val padded = createBitmap(plane.rowStride / plane.pixelStride, image.height)
-        padded.copyPixelsFromBuffer(plane.buffer.rewind())
-        Bitmap.createBitmap(padded, 0, 0, image.width, image.height).also { if (it !== padded) padded.recycle() }
+        try {
+            padded.copyPixelsFromBuffer(plane.buffer.rewind())
+            val width = minOf(image.width, maxWidth)
+            val result = createBitmap(width, (image.height.toLong() * width / image.width).toInt().coerceAtLeast(1))
+            Canvas(result).drawBitmap(padded, Rect(0, 0, image.width, image.height), Rect(0, 0, result.width, result.height), Paint(Paint.FILTER_BITMAP_FLAG))
+            return result
+        } finally { padded.recycle() }
     }
     fun close() {
         if (!closed.compareAndSet(false, true)) return

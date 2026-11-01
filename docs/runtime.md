@@ -100,6 +100,16 @@ State distinguishes unpaired, permission required, wireless debugging off, conne
 
 Shizuku API/provider 13.1.5 supplies the other transport. The application sets each process's provider role before provider creation. The engine requests the main process's Binder. The user starts Shizuku and grants access. A non-daemon user service stays bound across commands and virtual-screen operations. It ends with its owner or explicit engine shutdown.
 
+## Local task preview
+
+`PhoneAccessibilityService` owns one `TaskOverlay`. `EngineService` supplies the active user task and its existing Pi events. The overlay displays tool labels and model-request status. It sends Stop through the same task cancellation handler. Result, error, cancellation and engine shutdown remove the window. It does not rebuild model history or change Pi's loop.
+
+`PhoneDisplay.previewFrames` reads the existing virtual display's `ImageReader`. It emits changed frames at most five times per second with a width of at most 360 pixels. Bitmap copying and scaling run on a worker dispatcher under the existing image lock. Full screenshots and OCR retain their original dimensions. The Compose subscription exists only while the card is expanded. Preview frames stay in the engine process and are not encoded, saved or sent to the model.
+
+The accessibility overlay uses `FLAG_NOT_FOCUSABLE` and a window sized to its content. Compose receives lifecycle and saved-state owners from its service host. Detaching the window disposes its composition. Main-screen capture and gestures hide the overlay and wait two display frames before dispatch. The window remains available during postcondition waits. Accessibility overlay events do not reset screen-stability timing.
+
+Platform references: [accessibility overlay windows](https://developer.android.com/reference/android/view/WindowManager.LayoutParams#TYPE_ACCESSIBILITY_OVERLAY), [ComposeView owners and disposal](https://developer.android.com/reference/kotlin/androidx/compose/ui/platform/ComposeView), and [ImageReader frame ownership](https://developer.android.com/reference/android/media/ImageReader).
+
 ## Task completion
 
 The runtime passes the user's original message to `session.prompt`. Pi runs tools and returns their results to the model. Its final reply ends the loop. Pi saves session entries during execution. PhoneBot publishes the final reply after the SDK settles. Model errors and cancellation use their own terminal events. A result marks the end of execution, not independent certification of the user's goal.

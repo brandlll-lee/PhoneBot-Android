@@ -4,6 +4,8 @@ import android.app.UiAutomation
 import android.content.ComponentName
 import android.content.Intent
 import android.graphics.BitmapFactory
+import android.graphics.Bitmap
+import android.graphics.Rect
 import android.hardware.display.DisplayManager
 import android.os.Bundle
 import android.os.Handler
@@ -13,6 +15,10 @@ import android.os.ParcelFileDescriptor
 import android.os.PowerManager
 import android.os.ResultReceiver
 import android.os.SystemClock
+import android.view.accessibility.AccessibilityNodeInfo
+import android.view.accessibility.AccessibilityWindowInfo
+import android.view.WindowInsets
+import android.view.WindowManager
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.filters.SdkSuppress
 import androidx.test.platform.app.InstrumentationRegistry
@@ -36,7 +42,9 @@ import dev.phonebot.android.phone.PhoneDisplay
 class PhoneDisplayTest {
     private val instrumentation = InstrumentationRegistry.getInstrumentation()
     private val context = instrumentation.targetContext
-    private val automation = instrumentation.getUiAutomation(UiAutomation.FLAG_DONT_SUPPRESS_ACCESSIBILITY_SERVICES)
+    private val automation = instrumentation.getUiAutomation(UiAutomation.FLAG_DONT_SUPPRESS_ACCESSIBILITY_SERVICES).apply {
+        serviceInfo = serviceInfo.apply { flags = flags or android.accessibilityservice.AccessibilityServiceInfo.FLAG_RETRIEVE_INTERACTIVE_WINDOWS }
+    }
     private val images = mutableListOf<File>()
 
     private fun shell(command: String): String = automation.executeShellCommand(command).use {
@@ -292,5 +300,109 @@ class PhoneDisplayTest {
             if (networkBefore != null) assertEquals("Screen-off HTTPS status changed", networkBefore, networkStatus(checkNotNull(networkUrl)))
             assertFalse("Virtual operation woke the physical screen", power.isInteractive)
         } finally { if (wake.isHeld) wake.release(); shell("input keyevent 224"); shell("wm dismiss-keyguard") }
+    }
+
+    private fun overlayNode(label: String): AccessibilityNodeInfo? {
+        automation.clearCache()
+        return automation.windows
+        .filter { it.type == AccessibilityWindowInfo.TYPE_ACCESSIBILITY_OVERLAY }
+        .mapNotNull { it.root }.firstNotNullOfOrNull { root ->
+            fun find(node: AccessibilityNodeInfo): AccessibilityNodeInfo? {
+                if (node.text?.toString() == label || node.contentDescription?.toString() == label) return node
+                for (i in 0 until node.childCount) node.getChild(i)?.let { find(it) }?.let { return it }
+                return null
+            }
+            find(root)
+        }
+    }
+
+    private fun overlay(label: String): AccessibilityNodeInfo {
+        val deadline = SystemClock.uptimeMillis() + 8000
+        while (SystemClock.uptimeMillis() < deadline) {
+            overlayNode(label)?.let { return it }
+            SystemClock.sleep(100)
+        }
+        throw AssertionError("Missing overlay control: $label")
+    }
+
+    private fun clickOverlay(label: String) {
+        val bounds = Rect().also { overlay(label).getBoundsInScreen(it) }
+        shell("input -d 0 tap ${bounds.centerX()} ${bounds.centerY()}")
+    }
+
+    private fun captureOverlay(name: String) {
+        val bitmap = checkNotNull(automation.takeScreenshot())
+        try { File(context.getExternalFilesDir(null), name).outputStream().use { bitmap.compress(Bitmap.CompressFormat.JPEG, 85, it) } }
+        finally { bitmap.recycle() }
+    }
+
+    @Test fun floatingVirtualPreview() = withPhone {
+        val helper = listOf("builtin", "shizuku").firstOrNull(::ready)
+        assumeTrue("No connected helper", helper != null)
+        val displayId = target(checkNotNull(helper), "virtual").getInt("displayId")
+        call("test_launch")
+        val focus = shell("dumpsys window displays").lineSequence().firstOrNull { it.contains("mCurrentFocus=") }
+        assertNotNull("Main focus was not reported", focus)
+        val preview = call("test_preview")
+        assertTrue(preview.toString(), preview.getInt("width") <= 360)
+        val original = screen(displayId)
+        assertEquals(original.getInt("height").toDouble() / original.getInt("width"), preview.getInt("height").toDouble() / preview.getInt("width"), 0.01)
+        call("test_overlay", JSONObject().put("show", true))
+        val bubble = Rect().also { overlay("◉ PhoneBot").getBoundsInScreen(it) }
+        shell("input -d 0 swipe ${bubble.centerX()} ${bubble.centerY()} ${bubble.centerX() + 200} ${bubble.centerY() + 300} 500")
+        val moved = Rect()
+        val dragDeadline = SystemClock.uptimeMillis() + 3000
+        do { overlay("◉ PhoneBot").getBoundsInScreen(moved); if (moved.top != bubble.top) break; SystemClock.sleep(100) }
+        while (SystemClock.uptimeMillis() < dragDeadline)
+        assertNotEquals("Floating control did not move", bubble.top, moved.top)
+        clickOverlay("◉ PhoneBot")
+        overlay("读取页面")
+        val compact = Rect().also { overlay("Agent 虚拟屏画面").getBoundsInScreen(it) }
+        clickOverlay("Agent 虚拟屏画面")
+        SystemClock.sleep(300)
+        val enlarged = Rect().also { overlay("Agent 虚拟屏画面").getBoundsInScreen(it) }
+        assertTrue("Preview did not expand", enlarged.height() > compact.height())
+        val metrics = context.getSystemService(WindowManager::class.java).maximumWindowMetrics
+        val insets = metrics.windowInsets.getInsetsIgnoringVisibility(WindowInsets.Type.systemBars() or WindowInsets.Type.displayCutout())
+        val card = Rect().also { overlay("停止任务").window.getBoundsInScreen(it) }
+        assertTrue("Preview covers system bars: $card / ${metrics.bounds} / $insets", card.top >= insets.top && card.bottom <= metrics.bounds.bottom - insets.bottom)
+        captureOverlay("overlay-virtual.jpg")
+        assertEquals("Preview stole main focus", focus, shell("dumpsys window displays").lineSequence().firstOrNull { it.contains("mCurrentFocus=") })
+        call("input_text", JSONObject().put("resourceId", "android:id/edit").put("text", "悬浮预览中文测试"))
+        image(displayId)
+        clickOverlay("收起预览")
+        overlay("◉ PhoneBot")
+        assertEquals(displayId, call("test_overlay").getInt("displayId"))
+        assertTrue(screen(displayId).getJSONArray("elements").objects().any { it.optString("text") == "悬浮预览中文测试" })
+        clickOverlay("◉ PhoneBot")
+        overlay("Agent 虚拟屏画面")
+        clickOverlay("停止任务")
+        assertTrue(call("test_overlay").getBoolean("stopped"))
+        assertNull(overlayNode("◉ PhoneBot"))
+        assertNull(overlayNode("停止任务"))
+    }
+
+    @Test fun floatingMainProgress() = withPhone {
+        val helper = listOf("builtin", "shizuku").firstOrNull(::ready)
+        assumeTrue("No connected helper", helper != null)
+        target(checkNotNull(helper), "main")
+        call("test_launch")
+        call("test_overlay", JSONObject().put("show", true))
+        clickOverlay("◉ PhoneBot")
+        overlay("读取页面")
+        assertNull(overlayNode("Agent 虚拟屏画面"))
+        captureOverlay("overlay-main.jpg")
+        val observed = screen(0)
+        assertFalse(observed.toString(), observed.getJSONArray("elements").objects().any { it.optString("text") == "检查执行屏幕" })
+        val screenshot = call("screen_read", JSONObject().put("image", true).put("ocr", true))
+        images += File(screenshot.getString("image"))
+        assertFalse(screenshot.toString(), screenshot.getJSONArray("ocr").objects().any { it.optString("text").contains("读取页面") })
+        val button = screen(0).getJSONArray("elements").objects().single { it.optString("text") == "确认点击" }.getJSONArray("bounds")
+        val tapped = call("tap", JSONObject().put("x", (button.getInt(0) + button.getInt(2)) / 2)
+            .put("y", (button.getInt(1) + button.getInt(3)) / 2).put("expect", JSONObject().put("text", "点击成功")))
+        assertTrue(tapped.toString(), tapped.getBoolean("conditionMet"))
+        overlay("停止任务")
+        clickOverlay("停止任务")
+        assertTrue(call("test_overlay").getBoolean("stopped"))
     }
 }

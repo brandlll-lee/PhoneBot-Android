@@ -34,6 +34,8 @@ Session settings tests use separate storage. They check old-session defaults, sa
 
 `screenOffVirtual` turns off the physical screen. It checks virtual input, taps, swipes, screenshots and OCR, then wakes the phone. An optional HTTPS `networkUrl` argument compares the response status before and after screen-off. This short test does not establish deep-Doze or long-running cloud reliability. Reboot recovery and Android 17 local-network permission require separate device acceptance.
 
+`PhoneDisplayTest#floatingVirtualPreview` checks preview size and aspect ratio, main-display drag gestures, compact/enlarged image bounds, system-bar clearance, main focus, Chinese input, screenshots, collapse and the Stop callback. `floatingMainProgress` checks progress without a mirrored image, tree isolation, screenshot/OCR isolation and actions while the card is present. Both use controlled pages and preserve model credentials. They save local JPEG screenshots for visual inspection. Run them at the normal font scale and at 1.3. Restore the phone's font scale after the run.
+
 Run the full suite on a test installation. The authentication test changes provider credentials and the default model. For the user's configured phone, select only the controlled page test:
 
 ```powershell
@@ -57,6 +59,14 @@ Use real provider credentials to validate cloud requests. Keep keys out of comma
 The lifecycle test deliberately kills the engine process. Accessibility runs in that process. On the S21, Android can retain that service in its crashed-service set while its enabled setting remains present. Before another phone-tool run, switch only PhoneBot's accessibility service off and on in system settings. The validation run restored that binding after fault injection. Normal task cancellation aborts Pi and tool work; it does not kill the process. Process ownership and automatic service recovery need a separate lifecycle change.
 
 ## Validation record
+
+Validated on 2026-11-01 for floating task previews:
+
+- Runtime: 22 tests passed. JVM: 7 tests passed. `assembleDebug`, `assembleDebugAndroidTest`, `testDebugUnitTest` and `lintDebug` passed. APK ZIP alignment passed.
+- Samsung S21, Android 14, ARM64: 11 selected tests passed across grouped runs. They covered both assistants on both screen modes, draggable controls, virtual preview sizing and enlargement, main-screen progress, Chinese input, focus preservation, screenshot and gesture isolation, Stop, conversation navigation, Markdown and execution traces.
+- The two floating-window tests also passed at 1.3 font scale. Actual screenshots were inspected. The enlarged card stayed above the system navigation bar. The tests restored font scale and used controlled pages. The APK was installed as an update and existing model credentials were preserved.
+
+A cloud-backed third-party app task was not rerun for this feature.
 
 Validated on 2026-11-01 for the official Pi session SDK:
 

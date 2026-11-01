@@ -18,6 +18,11 @@ internal object TaskNotifications {
     fun channel(context: Context) = context.getSystemService(NotificationManager::class.java).createNotificationChannel(
         NotificationChannel(CHANNEL, "任务结果", NotificationManager.IMPORTANCE_HIGH))
 
+    fun open(context: Context, start: JSONObject): Intent = Intent(context, MainActivity::class.java)
+        .setData("phonebot://task/${start.getString("taskId")}".toUri())
+        .putExtra("session", start.getString("session")).putExtra("task", start.getString("taskId"))
+        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+
     fun post(context: Context, journal: TaskJournal, start: JSONObject, event: JSONObject): Boolean {
         val title = when (event.optString("type")) {
             "result" -> "执行结束"
@@ -33,10 +38,7 @@ internal object TaskNotifications {
         val allowed = manager.areNotificationsEnabled() && manager.getNotificationChannel(CHANNEL).importance != NotificationManager.IMPORTANCE_NONE
         journal.append(JSONObject().put("type", "notification").put("taskId", id).put("allowed", allowed))
         if (!allowed) return false
-        val open = Intent(context, MainActivity::class.java).setData("phonebot://task/$id".toUri())
-            .putExtra("session", start.getString("session")).putExtra("task", id)
-            .addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
-        val pending = PendingIntent.getActivity(context, 0, open, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
+        val pending = PendingIntent.getActivity(context, 0, open(context, start), PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
         val summary = MarkdownAnswer.plain(event.optString("text", event.optString("message"))).take(240)
         val notification = Notification.Builder(context, CHANNEL).setSmallIcon(R.drawable.ic_notification)
             .setContentTitle("$title · ${start.getString("prompt").take(40)}")

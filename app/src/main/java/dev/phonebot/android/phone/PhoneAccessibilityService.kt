@@ -43,19 +43,28 @@ class PhoneAccessibilityService : AccessibilityService() {
     private val screen = ScreenState(this)
     private val actions = PhoneActions(this, screen)
     internal var target: PhoneDisplay? = null; private set
+    internal var overlay: TaskOverlay? = null; private set
     internal var lastScreenEvent = 0L; private set
 
     override fun onServiceConnected() {
         instance = this
+        overlay?.destroy()
+        overlay = TaskOverlay(this)
         if (Build.VERSION.SDK_INT >= 33) serviceInfo = serviceInfo.apply { flags = flags or AccessibilityServiceInfo.FLAG_INPUT_METHOD_EDITOR }
     }
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
         val id = target?.displayId ?: Display.DEFAULT_DISPLAY
-        if (event == null || Build.VERSION.SDK_INT < 30 || windowsOnAllDisplays.get(id).orEmpty().any { it.id == event.windowId }) lastScreenEvent = SystemClock.uptimeMillis()
+        val windows = if (Build.VERSION.SDK_INT >= 30) windowsOnAllDisplays.get(id).orEmpty() else windows
+        if (event == null || windows.any { it.id == event.windowId && it.type != android.view.accessibility.AccessibilityWindowInfo.TYPE_ACCESSIBILITY_OVERLAY }) lastScreenEvent = SystemClock.uptimeMillis()
     }
     override fun onInterrupt() = Unit
+    override fun onConfigurationChanged(newConfig: android.content.res.Configuration) {
+        super.onConfigurationChanged(newConfig)
+        overlay?.resize()
+    }
     override fun onDestroy() {
         instance = null
+        overlay?.destroy(); overlay = null
         if (chineseHolder.isInitialized()) chineseHolder.value.close()
         if (latinHolder.isInitialized()) latinHolder.value.close()
         super.onDestroy()
@@ -69,7 +78,12 @@ class PhoneAccessibilityService : AccessibilityService() {
     fun available(): Boolean = if (target?.virtual == true) target?.alive() == true else
         !getSystemService(KeyguardManager::class.java).isKeyguardLocked && getSystemService(PowerManager::class.java).isInteractive
 
-    internal suspend fun gesture(path: Path, duration: Long) = suspendCancellableCoroutine { continuation ->
+    internal suspend fun gesture(path: Path, duration: Long) {
+        val preview = overlay
+        if (preview != null) preview.hiddenWhile { dispatch(path, duration) } else dispatch(path, duration)
+    }
+
+    private suspend fun dispatch(path: Path, duration: Long): Unit = suspendCancellableCoroutine { continuation ->
         val gesture = GestureDescription.Builder().addStroke(GestureDescription.StrokeDescription(path, 0, duration)).build()
         val accepted = dispatchGesture(gesture, object : GestureResultCallback() {
             override fun onCompleted(gestureDescription: GestureDescription?) { if (continuation.isActive) continuation.resume(Unit) }
@@ -80,6 +94,11 @@ class PhoneAccessibilityService : AccessibilityService() {
 
     private suspend fun capture(): Bitmap {
         if (target?.virtual == true) return checkNotNull(target).frame()
+        val preview = overlay
+        return if (preview != null) preview.hiddenWhile { captureMain() } else captureMain()
+    }
+
+    private suspend fun captureMain(): Bitmap {
         if (Build.VERSION.SDK_INT < 30) error("截图和 OCR 需要 Android 11 或更高版本")
         return suspendCancellableCoroutine { continuation ->
             takeScreenshot(Display.DEFAULT_DISPLAY, mainExecutor, object : TakeScreenshotCallback {

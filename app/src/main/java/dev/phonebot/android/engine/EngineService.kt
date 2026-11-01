@@ -325,7 +325,15 @@ class EngineService : Service() {
         if (event.optString("type") == "auth_event") loginEvent = event
         if (taskStart != null && event.optString("taskId") == taskStart?.optString("taskId") && event.optString("type") in setOf("result", "error", "cancelled", "interrupted")) taskEnded = true
         taskStart?.takeIf { it.optString("taskId") == event.optString("taskId") }?.let { TaskNotifications.post(this, journal, it, safe) }
+        updateOverlay(safe)
         sendToClients { eventMessage(safe) }
+    }
+
+    private fun updateOverlay(event: JSONObject? = null) {
+        val overlay = PhoneAccessibilityService.instance?.overlay ?: return
+        val start = taskStart
+        if (closing || taskEnded || state.phase != EnginePhase.RUNNING || start?.optString("taskId") != taskId) overlay.close()
+        else overlay.update(start, display, event) { handleCommand(JSONObject().put("type", "cancel").toString()) }
     }
 
     private fun eventMessage(event: JSONObject) = Message.obtain(null, EngineIpc.EVENT).apply { data = Bundle().apply { putString("json", event.toString()) } }
@@ -383,6 +391,7 @@ class EngineService : Service() {
 
     private fun publish(next: EngineState) {
         state = next
+        updateOverlay()
         sendToClients {
             Message.obtain(null, EngineIpc.STATE).apply {
                 data = Bundle().apply { putString("phase", next.phase.name); putString("detail", next.detail); putInt("pid", next.pid) }

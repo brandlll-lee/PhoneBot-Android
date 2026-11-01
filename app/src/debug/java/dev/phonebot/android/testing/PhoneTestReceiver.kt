@@ -14,6 +14,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withTimeout
+import kotlinx.coroutines.flow.first
 import org.json.JSONObject
 
 class PhoneTestReceiver : BroadcastReceiver() {
@@ -22,6 +23,7 @@ class PhoneTestReceiver : BroadcastReceiver() {
         private var shell: PhoneShell? = null
         @android.annotation.SuppressLint("StaticFieldLeak")
         private var display: PhoneDisplay? = null
+        private var overlayStopped = false
     }
     override fun onReceive(context: Context, intent: Intent) {
         @Suppress("DEPRECATION") val result = intent.getParcelableExtra<ResultReceiver>("reply") ?: return
@@ -35,10 +37,23 @@ class PhoneTestReceiver : BroadcastReceiver() {
                     val target = display ?: PhoneDisplay(context.applicationContext, executor).also { display = it }
                     if (name == "helper_status") return@withTimeout executor.state(params.optString("helper", "shizuku"))
                     if (name == "helper_pair") { executor.pair(params.getInt("port"), params.getString("code")); return@withTimeout executor.state("builtin") }
-                    if (name == "test_release") { target.select("test-release", "shizuku", "main"); PhoneAccessibilityService.instance?.bind(target); return@withTimeout JSONObject().put("ok", true) }
+                    if (name == "test_release") { PhoneAccessibilityService.instance?.overlay?.close(); target.select("test-release", "shizuku", "main"); PhoneAccessibilityService.instance?.bind(target); return@withTimeout JSONObject().put("ok", true) }
                     if (name in PhoneSystem.tools) return@withTimeout PhoneSystem(context, executor, target).execute(name, params)
                     while (PhoneAccessibilityService.instance == null) delay(100)
                     val service = checkNotNull(PhoneAccessibilityService.instance) { "无障碍服务未连接" }
+                    if (name == "test_preview") {
+                        val bitmap = target.previewFrames().first()
+                        try { return@withTimeout JSONObject().put("width", bitmap.width).put("height", bitmap.height) }
+                        finally { bitmap.recycle() }
+                    }
+                    if (name == "test_overlay") {
+                        if (params.optBoolean("show")) {
+                            overlayStopped = false
+                            service.overlay!!.update(JSONObject().put("taskId", "overlay-test").put("session", "overlay-test").put("prompt", "检查执行屏幕"), target,
+                                JSONObject().put("type", "step").put("label", "读取页面")) { overlayStopped = true; service.overlay?.close() }
+                        }
+                        return@withTimeout JSONObject().put("stopped", overlayStopped).put("displayId", target.displayId)
+                    }
                     if (name == "test_target") {
                         target.select(params.optString("session", "test-session"), params.getString("helper"), params.getString("screen"))
                         target.prepare(); service.bind(target)

@@ -25,6 +25,7 @@ You give the task. It takes action.
 - **Keep the conversation going.** Pi manages sessions, restoration and automatic context compaction. Reopen PhoneBot to continue an existing conversation.
 - **Operate your phone.** Open apps, read screens, tap, swipe, enter Chinese text, go Back and go Home. Use Chinese/English OCR or screenshots when needed.
 - **Choose the execution screen.** Operate the main screen or use a separate virtual display. Each conversation saves its screen and helper choice.
+- **Watch it work.** During a task, tap the draggable PhoneBot bubble to see the current step and virtual display. Tap the image to enlarge it. Collapse the card while the task continues. Main-screen mode shows progress.
 - **Handle everyday settings.** Read and adjust media volume, set brightness and open system settings. Use system apps for alarms, timers and calendar entries.
 - **Follow the process.** Expand the trace to inspect returned thinking, intermediate text, tool calls and results. Final replies support Markdown, tables and code blocks.
 - **Stop at any time.** Run one task at a time. Tasks pause when a required permission is missing. Stop the current task or return to its conversation from a result notification.
@@ -54,6 +55,8 @@ Enable **通知权限** (Notifications) and **任务结果横幅** (Task result 
 Use **主屏幕／虚拟屏幕** (Main screen / Virtual display) above the input to select the screen for this conversation. Open **会话设置** (Conversation settings) to choose **内置助手** (Built-in helper) or **Shizuku**. PhoneBot saves these choices. You do not need to select them for each task. Press **设为新会话默认配置** (Use for new conversations) to set the defaults for future conversations. Existing conversations keep their own choices.
 
 Basic main-screen control does not need a helper. Virtual displays need Android 14 or later and a working helper. All conversations share device connections and authorization. A running task keeps its selected helper and screen.
+
+During a task, tap the **PhoneBot** bubble to see progress. Virtual-display mode also shows its live screen. Tap the image to enlarge it. Drag the bubble or card header to move it. Press **×** to collapse the card while the task continues. Use **停止任务** (Stop task) or **返回会话** (Return to conversation) at the bottom. The bubble closes when execution ends.
 
 Open **设置 → 设备助手** (Settings → Device helper):
 

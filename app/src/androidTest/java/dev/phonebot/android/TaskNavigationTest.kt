@@ -1,11 +1,11 @@
 package dev.phonebot.android
 
-import android.content.Intent
 import android.os.SystemClock
 import androidx.lifecycle.ViewModelProvider
 import androidx.test.core.app.ActivityScenario
 import androidx.test.platform.app.InstrumentationRegistry
 import dev.phonebot.android.engine.TaskJournal
+import dev.phonebot.android.engine.TaskNotifications
 import java.io.File
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
@@ -22,7 +22,8 @@ class TaskNavigationTest {
             journal.append(JSONObject().put("type", "task_open").put("taskId", id).put("session", id).put("prompt", "跳转测试 $index"))
             journal.append(JSONObject().put("type", "result").put("taskId", id).put("text", "**结果 $index**"))
         }
-        fun intent(id: String) = Intent(context, MainActivity::class.java).putExtra("session", id).putExtra("task", id)
+        // ActivityScenario matches lifecycle events against the original intent filter.
+        fun intent(id: String) = TaskNotifications.open(context, JSONObject().put("session", id).put("taskId", id)).setData(null)
         val scenario = ActivityScenario.launch<MainActivity>(intent(ids[0]))
         fun await(id: String) {
             val deadline = SystemClock.elapsedRealtime() + 10000
@@ -40,7 +41,7 @@ class TaskNavigationTest {
         }
         try {
             await(ids[0])
-            context.startActivity(intent(ids[1]).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP))
+            context.startActivity(intent(ids[1]))
             await(ids[1])
         } finally {
             scenario.onActivity { activity ->
