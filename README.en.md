@@ -25,7 +25,7 @@ You give the task. It takes action.
 - **Keep the conversation going.** Pi manages sessions, restoration and automatic context compaction. Reopen PhoneBot to continue an existing conversation.
 - **Operate your phone.** Open apps, read screens, tap, swipe, enter Chinese text, go Back and go Home. Use Chinese/English OCR or screenshots when needed.
 - **Choose the execution screen.** Operate the main screen or use a separate virtual display. Each conversation saves its screen and helper choice.
-- **Watch it work.** During a task, tap the draggable PhoneBot bubble to see the current step and virtual display. Tap the image to enlarge it. Collapse the card while the task continues. Main-screen mode shows progress.
+- **Watch it work.** Tap the bubble to view the live virtual display. Tap the image to collapse it. A blue dot marks an active task. Choose light, dark or system appearance.
 - **Handle everyday settings.** Read and adjust media volume, set brightness and open system settings. Use system apps for alarms, timers and calendar entries.
 - **Follow the process.** Expand the trace to inspect returned thinking, intermediate text, tool calls and results. Final replies support Markdown, tables and code blocks.
 - **Stop at any time.** Run one task at a time. Tasks pause when a required permission is missing. Stop the current task or return to its conversation from a result notification.
@@ -40,7 +40,7 @@ Download the APK to your phone. Open it in your file manager. Allow that file ma
 
 ### 2. Connect a model
 
-Open **设置 → 模型服务** (Settings → Model services). Choose a provider. Enter an API key or use the account login offered by that provider. Select a model and press **验证连接** (Verify connection).
+Open **··· → 设置 → 模型服务** (Settings → Model services). Choose a provider. Enter an API key or use the account login offered by that provider. Select a model and press **验证连接** (Verify connection). Change the theme under **设置 → 外观** (Settings → Appearance).
 
 The model must support tool calling. Screenshot input also needs image support. Pi supplies the catalog. Each provider defines its authentication methods. A successful connection check confirms that the selected model and credentials can make a request. It does not establish success for every phone task.
 
@@ -56,7 +56,7 @@ Use **主屏幕／虚拟屏幕** (Main screen / Virtual display) above the input
 
 Basic main-screen control does not need a helper. Virtual displays need Android 14 or later and a working helper. All conversations share device connections and authorization. A running task keeps its selected helper and screen.
 
-During a task, tap the **PhoneBot** bubble to see progress. Virtual-display mode also shows its live screen. Tap the image to enlarge it. Drag the bubble or card header to move it. Press **×** to collapse the card while the task continues. Use **停止任务** (Stop task) or **返回会话** (Return to conversation) at the bottom. The bubble closes when execution ends.
+During a task, tap the **PhoneBot** bubble to view the virtual screen. Tap the image to collapse it. Drag the bubble or image to move it. In main-screen mode, the bubble returns to the conversation. Stop the task from the chat. The bubble closes when execution ends.
 
 Open **设置 → 设备助手** (Settings → Device helper):
 

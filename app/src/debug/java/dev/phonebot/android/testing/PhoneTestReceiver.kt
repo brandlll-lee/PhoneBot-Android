@@ -23,7 +23,6 @@ class PhoneTestReceiver : BroadcastReceiver() {
         private var shell: PhoneShell? = null
         @android.annotation.SuppressLint("StaticFieldLeak")
         private var display: PhoneDisplay? = null
-        private var overlayStopped = false
     }
     override fun onReceive(context: Context, intent: Intent) {
         @Suppress("DEPRECATION") val result = intent.getParcelableExtra<ResultReceiver>("reply") ?: return
@@ -48,11 +47,10 @@ class PhoneTestReceiver : BroadcastReceiver() {
                     }
                     if (name == "test_overlay") {
                         if (params.optBoolean("show")) {
-                            overlayStopped = false
-                            service.overlay!!.update(JSONObject().put("taskId", "overlay-test").put("session", "overlay-test").put("prompt", "检查执行屏幕"), target,
-                                JSONObject().put("type", "step").put("label", "读取页面")) { overlayStopped = true; service.overlay?.close() }
+                            service.overlay!!.update(JSONObject().put("taskId", "overlay-test").put("session", "overlay-test").put("prompt", "检查执行屏幕"), target)
                         }
-                        return@withTimeout JSONObject().put("stopped", overlayStopped).put("displayId", target.displayId)
+                        if (params.optBoolean("close")) service.overlay?.close()
+                        return@withTimeout JSONObject().put("displayId", target.displayId).put("appearance", dev.phonebot.android.PhoneAppearance.mode.name)
                     }
                     if (name == "test_target") {
                         target.select(params.optString("session", "test-session"), params.getString("helper"), params.getString("screen"))

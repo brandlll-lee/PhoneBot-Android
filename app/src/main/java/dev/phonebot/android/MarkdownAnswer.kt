@@ -9,8 +9,6 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontFamily
-import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.unit.sp
 import com.mikepenz.markdown.compose.components.markdownComponents
 import com.mikepenz.markdown.compose.elements.MarkdownHighlightedCodeBlock
 import com.mikepenz.markdown.compose.elements.MarkdownHighlightedCodeFence
@@ -48,13 +46,15 @@ internal object MarkdownAnswer {
                 stream.append(text.substring(stream.content.length))
             }
         }
-        val colors = markdownColor(text = color, codeBackground = Color(0xFF222222), inlineCodeBackground = Color(0xFF2A2A2A), tableBackground = Color(0xFF1D1D1D))
-        val body = MaterialTheme.typography.bodyLarge.copy(fontSize = 17.sp, lineHeight = 28.sp)
+        val scheme = MaterialTheme.colorScheme
+        val colors = markdownColor(text = color, codeBackground = scheme.surfaceContainer, inlineCodeBackground = scheme.surfaceContainerHighest, tableBackground = scheme.surfaceContainerLow)
+        val body = PhoneUi.answerBody
         val typography = markdownTypography(text = body, paragraph = body, ordered = body, bullet = body, list = body,
-            h1 = body.copy(fontSize = 23.sp, fontWeight = FontWeight.SemiBold), h2 = body.copy(fontSize = 21.sp, fontWeight = FontWeight.SemiBold),
-            h3 = body.copy(fontSize = 19.sp, fontWeight = FontWeight.SemiBold), code = body.copy(fontFamily = FontFamily.Monospace, fontSize = 14.sp),
+            h1 = PhoneUi.answerHeading1, h2 = PhoneUi.answerHeading2,
+            h3 = PhoneUi.answerHeading3, code = PhoneUi.code,
             inlineCode = body.copy(fontFamily = FontFamily.Monospace), table = body)
-        val highlighter = remember { Highlights.Builder().theme(SyntaxThemes.default(darkMode = true)) }
+        val dark = scheme.background == Color.Black
+        val highlighter = remember(dark) { Highlights.Builder().theme(SyntaxThemes.default(darkMode = dark)) }
         val components = markdownComponents(
             codeFence = { MarkdownHighlightedCodeFence(it.content, it.node, highlightsBuilder = highlighter, showHeader = true) },
             codeBlock = { MarkdownHighlightedCodeBlock(it.content, it.node, highlightsBuilder = highlighter, showHeader = true) })

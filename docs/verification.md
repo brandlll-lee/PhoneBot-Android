@@ -34,7 +34,11 @@ Session settings tests use separate storage. They check old-session defaults, sa
 
 `screenOffVirtual` turns off the physical screen. It checks virtual input, taps, swipes, screenshots and OCR, then wakes the phone. An optional HTTPS `networkUrl` argument compares the response status before and after screen-off. This short test does not establish deep-Doze or long-running cloud reliability. Reboot recovery and Android 17 local-network permission require separate device acceptance.
 
-`PhoneDisplayTest#floatingVirtualPreview` checks preview size and aspect ratio, main-display drag gestures, compact/enlarged image bounds, system-bar clearance, main focus, Chinese input, screenshots, collapse and the Stop callback. `floatingMainProgress` checks progress without a mirrored image, tree isolation, screenshot/OCR isolation and actions while the card is present. Both use controlled pages and preserve model credentials. They save local JPEG screenshots for visual inspection. Run them at the normal font scale and at 1.3. Restore the phone's font scale after the run.
+`PhoneDisplayTest#floatingVirtualPreview` checks preview aspect ratio, drag gestures, system-bar clearance, main focus, Chinese input, screenshots, collapse and removal. `floatingMainBubble` checks the main-screen circle, tree isolation, screenshot/OCR isolation and actions while the window is present. `floatingThemeFollowsClientAndReconnect` checks appearance IPC and reconnection. These tests use controlled pages and preserve model credentials. Run the floating-window tests at normal font scale and at 1.3. Restore the phone's font scale after the run.
+
+`ThemeTest` renders chat, Markdown, menus and the composer in both palettes. It checks the actual background pixels and system appearance changes. It saves local PNGs for visual inspection. `ConversationSettingsTest#appearanceChangesPersistAndUpdateSystemBars` checks the real settings page, saved selection and status-bar icons. It restores the original appearance.
+
+`TraceTest` opens 200 tool steps and checks that only nearby rows are composed. It scrolls to the last result and collapses the trace. Its press test waits for native interaction feedback, checks blue text and verifies that the background stays unchanged. `PresentationTest#replyStreamsAndMovesToolTextIntoTheTrace` checks streamed reply text, tool-call transitions, finalization and cancellation through the same event projection used by journal replay.
 
 Run the full suite on a test installation. The authentication test changes provider credentials and the default model. For the user's configured phone, select only the controlled page test:
 
@@ -59,6 +63,14 @@ Use real provider credentials to validate cloud requests. Keep keys out of comma
 The lifecycle test deliberately kills the engine process. Accessibility runs in that process. On the S21, Android can retain that service in its crashed-service set while its enabled setting remains present. Before another phone-tool run, switch only PhoneBot's accessibility service off and on in system settings. The validation run restored that binding after fault injection. Normal task cancellation aborts Pi and tool work; it does not kill the process. Process ownership and automatic service recovery need a separate lifecycle change.
 
 ## Validation record
+
+Validated on 2026-11-01 for themes and live task UI:
+
+- Runtime: 22 tests passed for source and bundled Pi entry points, including forwarded text and tool-call events. JVM: 7 tests passed. APK builds, lint, ZIP alignment and bundled-runtime hash checks passed.
+- Samsung S21, Android 14, ARM64: 16 selected tests passed. They covered saved appearance, system bars, chat palettes, streamed reply bubbles, trace transitions, Markdown, composer behavior, exact-task navigation, floating windows and appearance IPC. The 200-step trace composed 9 tool rows after expansion; the previous layout composed all 200. The press test checked blue text with an unchanged background.
+- Eight selected tests also passed at 1.3 font scale. Screenshots of both palettes, the execution trace and virtual preview before and after Chinese input were inspected. The preview retained a continuous blue outline. The tests restored font scale. The APK was installed as an update and model credentials were preserved.
+
+These checks used controlled pages and local model fixtures. A cloud-backed third-party app task and release-build frame-rate profiling were not run.
 
 Validated on 2026-11-01 for floating task previews:
 

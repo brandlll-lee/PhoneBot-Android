@@ -336,6 +336,26 @@ class PhoneDisplayTest {
         finally { bitmap.recycle() }
     }
 
+    @Test fun floatingThemeFollowsClientAndReconnect() = withPhone {
+        val original = Appearance.from(context.getSharedPreferences("phonebot", 0).getString("appearance", null))
+        val client = dev.phonebot.android.engine.EngineClient(context)
+        fun await(mode: Appearance) {
+            val deadline = SystemClock.uptimeMillis() + 5000
+            while (call("test_overlay").getString("appearance") != mode.name && SystemClock.uptimeMillis() < deadline) SystemClock.sleep(100)
+            assertEquals(mode.name, call("test_overlay").getString("appearance"))
+        }
+        try {
+            instrumentation.runOnMainSync { client.attach() }
+            await(original)
+            for (mode in listOf(Appearance.LIGHT, Appearance.DARK)) {
+                instrumentation.runOnMainSync { client.appearance(mode) }
+                await(mode)
+            }
+            instrumentation.runOnMainSync { client.detach(); client.attach() }
+            await(Appearance.DARK)
+        } finally { instrumentation.runOnMainSync { client.appearance(original); client.detach() } }
+    }
+
     @Test fun floatingVirtualPreview() = withPhone {
         val helper = listOf("builtin", "shizuku").firstOrNull(::ready)
         assumeTrue("No connected helper", helper != null)
@@ -348,49 +368,41 @@ class PhoneDisplayTest {
         val original = screen(displayId)
         assertEquals(original.getInt("height").toDouble() / original.getInt("width"), preview.getInt("height").toDouble() / preview.getInt("width"), 0.01)
         call("test_overlay", JSONObject().put("show", true))
-        val bubble = Rect().also { overlay("◉ PhoneBot").getBoundsInScreen(it) }
+        val bubble = Rect().also { overlay("查看 Agent 屏幕").getBoundsInScreen(it) }
         shell("input -d 0 swipe ${bubble.centerX()} ${bubble.centerY()} ${bubble.centerX() + 200} ${bubble.centerY() + 300} 500")
         val moved = Rect()
         val dragDeadline = SystemClock.uptimeMillis() + 3000
-        do { overlay("◉ PhoneBot").getBoundsInScreen(moved); if (moved.top != bubble.top) break; SystemClock.sleep(100) }
+        do { overlay("查看 Agent 屏幕").getBoundsInScreen(moved); if (moved.top != bubble.top) break; SystemClock.sleep(100) }
         while (SystemClock.uptimeMillis() < dragDeadline)
         assertNotEquals("Floating control did not move", bubble.top, moved.top)
-        clickOverlay("◉ PhoneBot")
-        overlay("读取页面")
-        val compact = Rect().also { overlay("Agent 虚拟屏画面").getBoundsInScreen(it) }
-        clickOverlay("Agent 虚拟屏画面")
-        SystemClock.sleep(300)
-        val enlarged = Rect().also { overlay("Agent 虚拟屏画面").getBoundsInScreen(it) }
-        assertTrue("Preview did not expand", enlarged.height() > compact.height())
+        clickOverlay("查看 Agent 屏幕")
+        val frame = Rect().also { overlay("收起 Agent 屏幕").getBoundsInScreen(it) }
+        assertEquals("Preview aspect ratio changed", preview.getInt("width").toDouble() / preview.getInt("height"), frame.width().toDouble() / frame.height(), 0.01)
         val metrics = context.getSystemService(WindowManager::class.java).maximumWindowMetrics
         val insets = metrics.windowInsets.getInsetsIgnoringVisibility(WindowInsets.Type.systemBars() or WindowInsets.Type.displayCutout())
-        val card = Rect().also { overlay("停止任务").window.getBoundsInScreen(it) }
+        val card = Rect().also { overlay("收起 Agent 屏幕").window.getBoundsInScreen(it) }
         assertTrue("Preview covers system bars: $card / ${metrics.bounds} / $insets", card.top >= insets.top && card.bottom <= metrics.bounds.bottom - insets.bottom)
         captureOverlay("overlay-virtual.jpg")
         assertEquals("Preview stole main focus", focus, shell("dumpsys window displays").lineSequence().firstOrNull { it.contains("mCurrentFocus=") })
         call("input_text", JSONObject().put("resourceId", "android:id/edit").put("text", "悬浮预览中文测试"))
+        captureOverlay("overlay-virtual-input.jpg")
         image(displayId)
-        clickOverlay("收起预览")
-        overlay("◉ PhoneBot")
+        clickOverlay("收起 Agent 屏幕")
+        overlay("查看 Agent 屏幕")
         assertEquals(displayId, call("test_overlay").getInt("displayId"))
         assertTrue(screen(displayId).getJSONArray("elements").objects().any { it.optString("text") == "悬浮预览中文测试" })
-        clickOverlay("◉ PhoneBot")
-        overlay("Agent 虚拟屏画面")
-        clickOverlay("停止任务")
-        assertTrue(call("test_overlay").getBoolean("stopped"))
-        assertNull(overlayNode("◉ PhoneBot"))
-        assertNull(overlayNode("停止任务"))
+        call("test_overlay", JSONObject().put("close", true))
+        assertNull(overlayNode("查看 Agent 屏幕"))
+        assertNull(overlayNode("收起 Agent 屏幕"))
     }
 
-    @Test fun floatingMainProgress() = withPhone {
+    @Test fun floatingMainBubble() = withPhone {
         val helper = listOf("builtin", "shizuku").firstOrNull(::ready)
         assumeTrue("No connected helper", helper != null)
         target(checkNotNull(helper), "main")
         call("test_launch")
         call("test_overlay", JSONObject().put("show", true))
-        clickOverlay("◉ PhoneBot")
-        overlay("读取页面")
-        assertNull(overlayNode("Agent 虚拟屏画面"))
+        overlay("返回当前会话")
         captureOverlay("overlay-main.jpg")
         val observed = screen(0)
         assertFalse(observed.toString(), observed.getJSONArray("elements").objects().any { it.optString("text") == "检查执行屏幕" })
@@ -401,8 +413,7 @@ class PhoneDisplayTest {
         val tapped = call("tap", JSONObject().put("x", (button.getInt(0) + button.getInt(2)) / 2)
             .put("y", (button.getInt(1) + button.getInt(3)) / 2).put("expect", JSONObject().put("text", "点击成功")))
         assertTrue(tapped.toString(), tapped.getBoolean("conditionMet"))
-        overlay("停止任务")
-        clickOverlay("停止任务")
-        assertTrue(call("test_overlay").getBoolean("stopped"))
+        call("test_overlay", JSONObject().put("close", true))
+        assertNull(overlayNode("返回当前会话"))
     }
 }

@@ -14,6 +14,26 @@ import org.junit.Test
 class ConversationSettingsTest {
     @get:Rule val compose = createAndroidComposeRule<MainActivity>()
 
+    @Test fun appearanceChangesPersistAndUpdateSystemBars() {
+        lateinit var model: PhoneBotModel
+        compose.runOnIdle { model = ViewModelProvider(compose.activity)[PhoneBotModel::class.java] }
+        val original = model.appearance
+        try {
+            compose.onNodeWithContentDescription("更多选项").performClick()
+            compose.onNodeWithText("设置").performClick()
+            compose.onNode(hasText("外观") and hasClickAction()).performClick()
+            for (mode in listOf(Appearance.LIGHT, Appearance.DARK, Appearance.SYSTEM)) {
+                compose.onNode(hasText(mode.label) and hasClickAction()).performClick()
+                compose.runOnIdle {
+                    assertEquals(mode, model.appearance)
+                    assertEquals(mode.name, compose.activity.getSharedPreferences("phonebot", 0).getString("appearance", null))
+                    if (mode != Appearance.SYSTEM) assertEquals(mode == Appearance.LIGHT,
+                        androidx.core.view.WindowCompat.getInsetsController(compose.activity.window, compose.activity.window.decorView).isAppearanceLightStatusBars)
+                }
+            }
+        } finally { compose.runOnIdle { model.chooseAppearance(original) } }
+    }
+
     @Test fun settingsRowsChangeTheSessionHelperAndScreen() {
         lateinit var model: PhoneBotModel
         compose.runOnIdle { model = ViewModelProvider(compose.activity)[PhoneBotModel::class.java] }

@@ -102,7 +102,7 @@ Shizuku API/provider 13.1.5 supplies the other transport. The application sets e
 
 ## Local task preview
 
-`PhoneAccessibilityService` owns one `TaskOverlay`. `EngineService` supplies the active user task and its existing Pi events. The overlay displays tool labels and model-request status. It sends Stop through the same task cancellation handler. Result, error, cancellation and engine shutdown remove the window. It does not rebuild model history or change Pi's loop.
+`PhoneAccessibilityService` owns one `TaskOverlay`. `EngineService` supplies the active user task and selected display. Result, error, cancellation and engine shutdown remove the window. The overlay shows a logo circle or virtual screen. Main-screen taps open the recorded conversation. Appearance travels through the existing Messenger connection and reconnect handshake. It does not enter Pi's command stream.
 
 `PhoneDisplay.previewFrames` reads the existing virtual display's `ImageReader`. It emits changed frames at most five times per second with a width of at most 360 pixels. Bitmap copying and scaling run on a worker dispatcher under the existing image lock. Full screenshots and OCR retain their original dimensions. The Compose subscription exists only while the card is expanded. Preview frames stay in the engine process and are not encoded, saved or sent to the model.
 
@@ -116,7 +116,7 @@ The runtime passes the user's original message to `session.prompt`. Pi runs tool
 
 Input, system settings, and action postconditions are checked by their tools. The model reads these results and explains the outcome in its final reply. Task IDs identify IPC calls, journal records, and cancellation. Conversation history remains context for the next user message.
 
-Pi's `turn_start` supplies the request sequence. `message_update` forwards `text_delta` and `thinking_delta` with Pi's content index. `message_end` supplies the settled content blocks. Tool execution events retain Pi's call IDs and registered labels. Android projects these events into an ordered execution trace. The terminal result identifies the final request. Android moves only that request's text outside the trace. Thinking and earlier text stay in the trace. Live events and journal replay use the same projection. The runtime keeps `thinkingLevel` at `off`; providers that still return thinking blocks can display them.
+Pi's `turn_start` supplies the request sequence. `message_update` forwards `text_delta`, `thinking_delta` and `toolcall_start` with Pi's content index and tool-call presence. `message_end` supplies the settled content blocks. Tool execution events retain Pi's call IDs and registered labels. Android streams reply text in a bubble and moves it into the trace when Pi starts a tool call. The terminal result identifies and commits the final reply. Thinking and earlier text stay in the trace. Live events and journal replay use the same projection. This display state does not control Pi's loop or completion. The runtime keeps `thinkingLevel` at `off`; providers that still return thinking blocks can display them.
 
 ## Task records and model context
 

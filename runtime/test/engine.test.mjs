@@ -228,6 +228,9 @@ for (const entry of ["src/main.mjs", "dist/engine.mjs"]) {
     assert.equal(progress.request, 1);
     assert.equal(progress.contentIndex, 1);
     assert.equal(progress.delta, "我先调整媒体音量。");
+    assert.equal(typeof progress.toolCalls, "boolean");
+    assert.equal(host.seen.find((e) => e.type === "toolcall_start").toolCalls, true);
+    assert.equal(host.seen.find((e) => e.type === "text_delta" && e.request === result.request).toolCalls, false);
     assert.deepEqual(host.seen.find((e) => e.type === "model_response").content.map((b) => b.type), ["thinking", "text", "toolCall"]);
     assert.ok(host.seen.indexOf(thinking) < host.seen.indexOf(progress));
     assert.ok(host.seen.indexOf(progress) < host.seen.findIndex((e) => e.type === "step"));

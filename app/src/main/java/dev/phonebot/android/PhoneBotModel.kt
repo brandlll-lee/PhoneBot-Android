@@ -28,7 +28,7 @@ import org.json.JSONObject
 
 data class TaskStep(val id: String, val name: String, val args: String = "", val detail: String = "", val done: Boolean = false, val error: Boolean = false,
     val kind: String = "tool", val request: Int = 0)
-data class ChatTurn(val id: String, val prompt: String, val answer: String = "", val steps: List<TaskStep> = emptyList(), val status: String = "running", val image: String = "")
+data class ChatTurn(val id: String, val prompt: String, val answer: String = "", val steps: List<TaskStep> = emptyList(), val status: String = "running", val image: String = "", val streamText: String = "")
 data class ChatSession(val id: String = UUID.randomUUID().toString(), val title: String = "新对话", val updated: Long = System.currentTimeMillis(), val turns: List<ChatTurn> = emptyList(),
     val helper: String = "shizuku", val screen: String = "main")
 data class PiProvider(val id: String, val name: String, val count: Int, val configured: Boolean, val auth: List<Pair<String, String>>, val ambient: Boolean)
@@ -37,13 +37,17 @@ data class PiModel(val id: String, val name: String, val image: Boolean)
 fun JSONArray.objects(): List<JSONObject> = (0 until length()).map(::getJSONObject)
 
 internal fun ChatTurn.event(event: JSONObject): ChatTurn = when (event.optString("type")) {
+    "model_request", "toolcall_start" -> copy(streamText = "")
     "text_delta", "thinking_delta" -> {
         val request = event.getInt("request")
         val id = "message-$request-${event.getInt("contentIndex")}"
         val kind = event.getString("type").removeSuffix("_delta")
         val detail = steps.find { it.id == id }?.detail.orEmpty() + event.getString("delta")
         val step = TaskStep(id, "", detail = detail, kind = kind, request = request)
-        copy(steps = if (steps.any { it.id == id }) steps.map { if (it.id == id) step else it } else steps + step)
+        val updated = if (steps.any { it.id == id }) steps.map { if (it.id == id) step else it } else steps + step
+        copy(steps = updated, streamText = if (kind == "text") {
+            if (event.optBoolean("toolCalls")) "" else updated.filter { it.request == request && it.kind == "text" }.joinToString("") { it.detail }
+        } else streamText)
     }
     "model_response" -> {
         val request = event.getInt("request")
@@ -52,14 +56,15 @@ internal fun ChatTurn.event(event: JSONObject): ChatTurn = when (event.optString
             if (kind == "text" || kind == "thinking") TaskStep("message-$request-$index", "", detail = block.getString(if (kind == "text") "text" else "thinking"),
                 done = true, kind = kind, request = request) else null
         }
-        copy(steps = steps.filterNot { it.request == request && it.kind in listOf("text", "thinking") } + blocks)
+        copy(steps = steps.filterNot { it.request == request && it.kind in listOf("text", "thinking") } + blocks,
+            streamText = if (event.getJSONArray("content").objects().any { it.optString("type") == "toolCall" }) "" else blocks.filter { it.kind == "text" }.joinToString("") { it.detail })
     }
     "attachment" -> copy(image = event.getString("path"))
     "step" -> copy(steps = steps.filterNot { it.id == event.getString("id") } + TaskStep(event.getString("id"), event.optString("label", event.getString("name")), event.optJSONObject("args")?.toString().orEmpty()))
     "step_result" -> copy(steps = steps.map { if (it.id == event.getString("id")) it.copy(done = true, error = event.optBoolean("error"), detail = event.optString("text")) else it })
-    "result" -> copy(answer = event.getString("text"), status = "done",
+    "result" -> copy(answer = event.getString("text"), status = "done", streamText = "",
         steps = steps.filterNot { it.kind == "text" && it.request == event.optInt("request", steps.maxOfOrNull { step -> step.request } ?: 0) })
-    "error", "cancelled", "interrupted" -> copy(status = when (event.getString("type")) { "cancelled" -> "stopped"; "interrupted" -> "interrupted"; else -> "error" },
+    "error", "cancelled", "interrupted" -> copy(streamText = "", status = when (event.getString("type")) { "cancelled" -> "stopped"; "interrupted" -> "interrupted"; else -> "error" },
         steps = steps + TaskStep("terminal", "", detail = event.optString("message", "任务已停止"), done = true,
             error = event.getString("type") != "cancelled", kind = "status"))
     else -> this
@@ -68,6 +73,7 @@ internal fun ChatTurn.event(event: JSONObject): ChatTurn = when (event.optString
 class PhoneBotModel(application: Application) : AndroidViewModel(application) {
     val engine = EngineClient(application)
     private val preferences = application.getSharedPreferences("phonebot", 0)
+    var appearance by mutableStateOf(Appearance.from(preferences.getString("appearance", null))); private set
     private val historyFile = AtomicFile(File(application.filesDir, "chats.json"))
     private val journalDirectory = File(application.filesDir, "task-events")
     var sessions by mutableStateOf(listOf<ChatSession>()); private set
@@ -155,6 +161,12 @@ class PhoneBotModel(application: Application) : AndroidViewModel(application) {
         val current = session ?: return
         if (engine.state.value.canRun) engine.command(JSONObject().put("type", "phone_select").put("session", current.id).put("helper", current.helper).put("screen", current.screen))
     }
+    fun chooseAppearance(value: Appearance) {
+        appearance = value
+        preferences.edit { putString("appearance", value.name) }
+        engine.appearance(value)
+    }
+
     fun choosePhone(helper: String = session?.helper ?: defaultHelper, screen: String = session?.screen ?: defaultScreen) {
         if (activeTask.isNotEmpty()) return
         require(helper in setOf("builtin", "shizuku") && screen in setOf("main", "virtual"))
@@ -280,7 +292,7 @@ class PhoneBotModel(application: Application) : AndroidViewModel(application) {
             "auth_prompt" -> authPrompt = event
             "auth_event" -> authEvent = event
             "permission" -> { permission = event.getString("permission"); permissionMessage = event.optString("message"); refreshPermissions() }
-            "text_delta", "thinking_delta", "model_response", "attachment", "step", "step_result" -> if (event.optString("taskId") == activeTask) changeTurn { it.event(event) }
+            "model_request", "toolcall_start", "text_delta", "thinking_delta", "model_response", "attachment", "step", "step_result" -> if (event.optString("taskId") == activeTask) changeTurn { it.event(event) }
             "result" -> if (event.optString("taskId") == activeTask) changeTurn { it.event(event) } else notice = "自检通过"
             "error", "cancelled", "interrupted" -> {
                 val message = event.optString("message", "任务已停止")

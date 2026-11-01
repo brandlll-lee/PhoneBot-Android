@@ -13,21 +13,25 @@ import android.view.ViewConfiguration
 import android.view.WindowManager
 import android.widget.FrameLayout
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Close
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.dropShadow
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.shadow.Shadow
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.ComposeView
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
-import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleRegistry
 import androidx.lifecycle.setViewTreeLifecycleOwner
@@ -37,6 +41,8 @@ import androidx.savedstate.SavedStateRegistryController
 import androidx.savedstate.SavedStateRegistryOwner
 import androidx.savedstate.setViewTreeSavedStateRegistryOwner
 import dev.phonebot.android.PhoneBotTheme
+import dev.phonebot.android.PhoneBotLogo
+import dev.phonebot.android.PhoneUi
 import dev.phonebot.android.engine.TaskNotifications
 import kotlinx.coroutines.suspendCancellableCoroutine
 import org.json.JSONObject
@@ -53,35 +59,27 @@ internal class TaskOverlay(private val service: PhoneAccessibilityService) : Sav
     private var area by mutableStateOf(screenBounds())
     private var window: FrameLayout? = null
     private var task = ""
-    private var title by mutableStateOf("")
-    private var status by mutableStateOf("正在执行")
     private var expanded by mutableStateOf(false)
-    private var zoomed by mutableStateOf(false)
     private var display by mutableStateOf<PhoneDisplay?>(null)
     private var start = JSONObject()
-    private var stop: () -> Unit = {}
-    private var stopping by mutableStateOf(false)
     private val params = WindowManager.LayoutParams(
         WindowManager.LayoutParams.WRAP_CONTENT, WindowManager.LayoutParams.WRAP_CONTENT,
         WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY,
         WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
         PixelFormat.TRANSLUCENT,
     ).apply {
-        gravity = Gravity.TOP or Gravity.START; x = 16; y = 160
+        gravity = Gravity.TOP or Gravity.START
+        x = (PhoneUi.space.value * service.resources.displayMetrics.density).roundToInt()
+        y = (PhoneUi.touch.value * service.resources.displayMetrics.density).roundToInt()
         if (Build.VERSION.SDK_INT >= 30) { fitInsetsTypes = 0; layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_ALWAYS }
     }
 
     init { saved.performRestore(null); registry.currentState = Lifecycle.State.RESUMED }
 
-    fun update(start: JSONObject, target: PhoneDisplay, event: JSONObject?, onStop: () -> Unit) {
+    fun update(start: JSONObject, target: PhoneDisplay) {
         val id = start.getString("taskId")
-        if (id != task) { close(); task = id; status = "正在执行" }
-        this.start = start; title = start.getString("prompt"); display = target; stop = onStop
-        when (event?.optString("type")) {
-            "model_request", "thinking_delta", "text_delta" -> if (!stopping) status = "正在思考"
-            "step" -> status = event.optString("label").ifBlank { event.optString("name") }
-            "permission" -> status = event.optString("message").ifBlank { "等待授权，请返回会话处理" }
-        }
+        if (id != task) { close(); task = id }
+        this.start = start; display = target
         if (window == null) show()
     }
 
@@ -89,14 +87,12 @@ internal class TaskOverlay(private val service: PhoneAccessibilityService) : Sav
         val frame = object : FrameLayout(service) {
             private var downX = 0f; private var downY = 0f
             private var originX = 0; private var originY = 0
-            private var handle = false
             private val slop = ViewConfiguration.get(service).scaledTouchSlop
             override fun onInterceptTouchEvent(event: MotionEvent): Boolean {
                 if (event.actionMasked == MotionEvent.ACTION_DOWN) {
                     downX = event.rawX; downY = event.rawY; originX = params.x; originY = params.y
-                    handle = event.y < 56 * resources.displayMetrics.density
                 }
-                return handle && event.actionMasked == MotionEvent.ACTION_MOVE && hypot(event.rawX - downX, event.rawY - downY) > slop
+                return event.actionMasked == MotionEvent.ACTION_MOVE && hypot(event.rawX - downX, event.rawY - downY) > slop
             }
             override fun onTouchEvent(event: MotionEvent): Boolean {
                 if (event.actionMasked == MotionEvent.ACTION_MOVE) move(originX + (event.rawX - downX).roundToInt(), originY + (event.rawY - downY).roundToInt())
@@ -137,37 +133,42 @@ internal class TaskOverlay(private val service: PhoneAccessibilityService) : Sav
 
     @Composable private fun Content() {
         val target = display
-        val width = with(LocalDensity.current) { area.width().toDp() - 32.dp }
-        Surface(shape = RoundedCornerShape(if (expanded) 24.dp else 28.dp), tonalElevation = 6.dp, shadowElevation = 8.dp,
-            modifier = Modifier.testTag("task-overlay")) {
-            if (!expanded) {
-                Text("◉ PhoneBot", fontSize = 14.sp, modifier = Modifier.clickable { expanded = true }.padding(horizontal = 18.dp, vertical = 16.dp))
-            } else Column(Modifier.width(minOf(340.dp, width)).padding(12.dp)) {
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text(title, maxLines = 1, overflow = TextOverflow.Ellipsis, fontSize = 15.sp, modifier = Modifier.weight(1f).padding(top = 12.dp))
-                    IconButton(onClick = { expanded = false; zoomed = false }) { Icon(Icons.Default.Close, "收起预览") }
-                }
-                Text(status, maxLines = 2, overflow = TextOverflow.Ellipsis, fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(bottom = 8.dp))
-                if (target?.virtual == true) {
-                    val frame by remember(target) { target.previewFrames() }.collectAsState(initial = null)
-                    Preview(frame, zoomed) { zoomed = !zoomed }
-                }
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                    TextButton(onClick = { service.startActivity(TaskNotifications.open(service, start)); expanded = false; zoomed = false }) {
-                        Text("返回会话")
-                    }
-                    TextButton(enabled = !stopping, onClick = { stopping = true; status = "正在停止"; stop() }) {
-                        Text(if (stopping) "正在停止" else "停止任务")
-                    }
-                }
-            }
+        if (expanded && target?.virtual == true) {
+            val frame by remember(target) { target.previewFrames() }.collectAsState(initial = null)
+            frame?.let { Preview(it) } ?: Bubble { expanded = false }
+        } else Bubble {
+            if (target?.virtual == true) expanded = true
+            else service.startActivity(TaskNotifications.open(service, start))
         }
     }
 
-    @Composable private fun Preview(frame: Bitmap?, zoomed: Boolean, onClick: () -> Unit) {
-        val height = with(LocalDensity.current) { area.height().toDp() * if (zoomed) 0.60f else 0.30f }
-        if (frame == null) Text("等待虚拟屏画面", Modifier.height(80.dp).padding(12.dp), fontSize = 13.sp)
-        else Image(frame.asImageBitmap(), "Agent 虚拟屏画面", Modifier.fillMaxWidth().height(height).clickable(onClick = onClick).testTag("task-preview"))
+    @Composable private fun Bubble(onClick: () -> Unit) {
+        val colors = MaterialTheme.colorScheme
+        Box(Modifier.size(PhoneUi.touch).clickable(onClick = onClick).testTag("task-overlay")
+            .semantics { contentDescription = if (display?.virtual == true) "查看 Agent 屏幕" else "返回当前会话" }, contentAlignment = Alignment.Center) {
+            Box(Modifier.size(PhoneUi.bubble).clip(CircleShape).background(colors.background)
+                .border(PhoneUi.hairline, colors.outlineVariant, CircleShape), contentAlignment = Alignment.Center) {
+                PhoneBotLogo()
+            }
+            Box(Modifier.align(Alignment.BottomEnd).padding(PhoneUi.tiny).size(PhoneUi.activityDot)
+                .background(colors.tertiary, CircleShape).border(PhoneUi.frameLine, colors.background, CircleShape))
+        }
+    }
+
+    @Composable private fun Preview(frame: Bitmap) {
+        val ratio = frame.width.toFloat() / frame.height
+        val width = with(LocalDensity.current) {
+            minOf(PhoneUi.previewWidth, area.width().toDp() - PhoneUi.gap * 2, area.height().toDp() * PhoneUi.previewHeightFraction * ratio)
+        }
+        val blue = MaterialTheme.colorScheme.tertiary
+        Box(Modifier.padding(PhoneUi.space)) {
+            Box(Modifier.dropShadow(PhoneUi.frameShape, Shadow(radius = PhoneUi.glowRadius, color = blue.copy(alpha = PhoneUi.glowAlpha)))
+                .clip(PhoneUi.frameShape).background(blue).clickable { expanded = false }
+                .testTag("task-preview").semantics { contentDescription = "收起 Agent 屏幕" }.padding(PhoneUi.frameLine)) {
+                Image(frame.asImageBitmap(), null, contentScale = ContentScale.Fit,
+                    modifier = Modifier.width(width).aspectRatio(ratio).clip(PhoneUi.frameContentShape))
+            }
+        }
     }
 
     suspend fun <T> hiddenWhile(block: suspend () -> T): T {
@@ -183,7 +184,7 @@ internal class TaskOverlay(private val service: PhoneAccessibilityService) : Sav
 
     fun close() {
         window?.let { manager.removeViewImmediate(it) }
-        window = null; task = ""; display = null; expanded = false; zoomed = false; stopping = false; stop = {}
+        window = null; task = ""; display = null; expanded = false
     }
 
     fun destroy() { close(); registry.currentState = Lifecycle.State.DESTROYED }

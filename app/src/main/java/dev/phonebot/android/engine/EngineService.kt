@@ -20,6 +20,8 @@ import android.os.RemoteException
 import android.os.SystemClock
 import android.os.PowerManager
 import dev.phonebot.android.MainActivity
+import dev.phonebot.android.Appearance
+import dev.phonebot.android.PhoneAppearance
 import java.io.File
 import java.io.OutputStream
 import org.json.JSONObject
@@ -66,6 +68,7 @@ class EngineService : Service() {
     private val messenger = Messenger(Handler(Looper.getMainLooper()) { message ->
         when (message.what) {
             EngineIpc.CONNECT -> {
+                PhoneAppearance.mode = Appearance.from(message.data.getString("appearance"))
                 clients.add(message.replyTo); publish(state)
                 try {
                     taskStart?.let { start -> journal.records(File(filesDir, "task-events/${start.getString("taskId")}.jsonl")).forEach { message.replyTo.send(eventMessage(it)) } }
@@ -75,6 +78,7 @@ class EngineService : Service() {
             }
             EngineIpc.DISCONNECT -> clients.remove(message.replyTo)
             EngineIpc.COMMAND -> handleCommand(message.data.getString("json").orEmpty())
+            EngineIpc.APPEARANCE -> PhoneAppearance.mode = Appearance.from(message.data.getString("appearance"))
         }
         true
     })
@@ -325,15 +329,15 @@ class EngineService : Service() {
         if (event.optString("type") == "auth_event") loginEvent = event
         if (taskStart != null && event.optString("taskId") == taskStart?.optString("taskId") && event.optString("type") in setOf("result", "error", "cancelled", "interrupted")) taskEnded = true
         taskStart?.takeIf { it.optString("taskId") == event.optString("taskId") }?.let { TaskNotifications.post(this, journal, it, safe) }
-        updateOverlay(safe)
+        updateOverlay()
         sendToClients { eventMessage(safe) }
     }
 
-    private fun updateOverlay(event: JSONObject? = null) {
+    private fun updateOverlay() {
         val overlay = PhoneAccessibilityService.instance?.overlay ?: return
         val start = taskStart
         if (closing || taskEnded || state.phase != EnginePhase.RUNNING || start?.optString("taskId") != taskId) overlay.close()
-        else overlay.update(start, display, event) { handleCommand(JSONObject().put("type", "cancel").toString()) }
+        else overlay.update(start, display)
     }
 
     private fun eventMessage(event: JSONObject) = Message.obtain(null, EngineIpc.EVENT).apply { data = Bundle().apply { putString("json", event.toString()) } }

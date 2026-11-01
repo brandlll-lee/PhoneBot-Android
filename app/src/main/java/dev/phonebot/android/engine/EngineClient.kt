@@ -16,6 +16,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import org.json.JSONObject
+import dev.phonebot.android.Appearance
 
 class EngineClient(private val context: Context) {
     private val mutableState = MutableStateFlow(EngineState())
@@ -25,6 +26,7 @@ class EngineClient(private val context: Context) {
     private var remote: Messenger? = null
     private var bound = false
     private var terminalState: EngineState? = null
+    private var appearance = Appearance.from(context.getSharedPreferences("phonebot", 0).getString("appearance", null))
     private val receiver = Messenger(Handler(Looper.getMainLooper()) { message ->
         if (message.what == EngineIpc.STATE) {
             val data = message.data
@@ -40,7 +42,9 @@ class EngineClient(private val context: Context) {
     private val connection = object : ServiceConnection {
         override fun onServiceConnected(name: ComponentName, binder: IBinder) {
             remote = Messenger(binder)
-            try { remote?.send(Message.obtain(null, EngineIpc.CONNECT).apply { replyTo = receiver }) }
+            try { remote?.send(Message.obtain(null, EngineIpc.CONNECT).apply {
+                replyTo = receiver; data = Bundle().apply { putString("appearance", appearance.name) }
+            }) }
             catch (error: RemoteException) { disconnected(error.message ?: "Engine connection failed") }
         }
         override fun onServiceDisconnected(name: ComponentName) = disconnected("Engine process disconnected")
@@ -61,6 +65,12 @@ class EngineClient(private val context: Context) {
             attach()
             check(bound) { "Engine service binding failed" }
         } catch (error: Exception) { disconnected(error.message ?: "Engine start failed") }
+    }
+
+    fun appearance(value: Appearance) {
+        appearance = value
+        try { remote?.send(Message.obtain(null, EngineIpc.APPEARANCE).apply { data = Bundle().apply { putString("appearance", value.name) } }) }
+        catch (error: RemoteException) { disconnected(error.message ?: "Engine connection failed") }
     }
 
     fun probe() = send(JSONObject().put("type", "probe"))

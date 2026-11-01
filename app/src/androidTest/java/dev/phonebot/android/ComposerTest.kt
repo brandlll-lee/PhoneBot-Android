@@ -50,7 +50,7 @@ class ComposerTest {
         var message = ""
         var selected = ""
         var keyboardHeight = 0
-        compose.setContent { MaterialTheme {
+        compose.setContent { PhoneBotTheme {
             val height = WindowInsets.ime.getBottom(LocalDensity.current)
             SideEffect { keyboardHeight = height }
             Box(Modifier.fillMaxSize().imePadding()) {

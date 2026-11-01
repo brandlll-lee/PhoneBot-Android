@@ -35,6 +35,33 @@ class PresentationTest {
     @get:Rule val compose = createComposeRule()
     private val context = InstrumentationRegistry.getInstrumentation().targetContext
 
+    @Test fun replyStreamsAndMovesToolTextIntoTheTrace() {
+        val turn = mutableStateOf(ChatTurn("stream", "打开相册"))
+        compose.setContent { PhoneBotTheme { Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
+            ChatMessages(listOf(turn.value), if (turn.value.status == "running") turn.value.id else "", Modifier.fillMaxSize(), focusedTask = turn.value.id)
+        } } }
+        fun event(value: String) { compose.runOnIdle { turn.value = turn.value.event(JSONObject(value)) } }
+        event("""{"type":"text_delta","request":1,"contentIndex":0,"delta":"先读取页面。"}""")
+        compose.onNodeWithTag("assistant_message").assertIsDisplayed()
+        event("""{"type":"toolcall_start","request":1,"contentIndex":1}""")
+        compose.onNodeWithTag("assistant_message").assertDoesNotExist()
+        compose.waitUntil(5000) { compose.onAllNodes(androidx.compose.ui.test.hasText("先读取页面。")).fetchSemanticsNodes().isNotEmpty() }
+        compose.onNodeWithText("先读取页面。").assertIsDisplayed()
+        event("""{"type":"model_request","request":2}""")
+        event("""{"type":"text_delta","request":2,"contentIndex":0,"delta":"**相册"}""")
+        compose.onNodeWithTag("assistant_message").assertIsDisplayed()
+        event("""{"type":"text_delta","request":2,"contentIndex":0,"delta":"已打开**"}""")
+        compose.waitUntil(5000) { compose.onAllNodes(androidx.compose.ui.test.hasText("相册已打开")).fetchSemanticsNodes().size == 1 }
+        event("""{"type":"model_response","request":2,"stopReason":"stop","content":[{"type":"text","text":"**相册已打开**"}]}""")
+        compose.onNodeWithTag("assistant_message").assertIsDisplayed()
+        event("""{"type":"result","request":2,"text":"**相册已打开**"}""")
+        compose.onNodeWithTag("assistant_message").assertIsDisplayed()
+        assertEquals("", turn.value.streamText)
+        compose.waitUntil(5000) { compose.onAllNodes(androidx.compose.ui.test.hasText("相册已打开")).fetchSemanticsNodes().size == 1 }
+        assertEquals("", ChatTurn("cancel", "任务").event(JSONObject("""{"type":"text_delta","request":1,"contentIndex":0,"delta":"未完"}"""))
+            .event(JSONObject("""{"type":"cancelled"}""")).streamText)
+    }
+
     @Test fun piMessagesStayOrderedInTheTraceAndFinalReplyStaysOutside() {
         val events = listOf(
             """{"type":"thinking_delta","request":1,"contentIndex":0,"delta":"先确认当前页面。"}""",
@@ -69,7 +96,7 @@ class PresentationTest {
 
         val turn = mutableStateOf(current)
         compose.setContent { PhoneBotTheme { Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
-            Column(Modifier.verticalScroll(rememberScrollState()).padding(20.dp)) { ChatTurnView(turn.value, turn.value.status == "running") }
+            ChatMessages(listOf(turn.value), if (turn.value.status == "running") turn.value.id else "", Modifier.fillMaxSize(), focusedTask = turn.value.id)
         } } }
         compose.onNodeWithTag("execution_trace").assertIsDisplayed()
         compose.onNodeWithText("先确认当前页面。").assertIsDisplayed()
