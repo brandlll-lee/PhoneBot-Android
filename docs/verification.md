@@ -26,6 +26,8 @@ Composer tests use an edge-to-edge activity with resize behavior, as the main ac
 
 Session tests use separate storage. They check old-session defaults, saved helper/screen choices, new-session defaults, and restored choices. Composer tests also check screen selection and disabled controls during execution.
 
+`ConversationSettingsTest` opens the actual app and its conversation settings. It presses both helper choices and both screen choices, checks the selected labels and model values, and restores the original session configuration. It also checks that engine/version status rows have no click action. It preserves provider credentials and global defaults.
+
 `PhoneDisplayTest` needs Android 14 and connected helpers. Run its four `shizukuMain`, `shizukuVirtual`, `builtinMain`, and `builtinVirtual` methods after authorization. A disconnected helper causes a skip, not a pass. Check instrumentation status codes. Each combination checks the actual helper UID, display geometry, Chinese input, actions, screenshots and OCR. Virtual runs also check the main task and release the previous session display. Other methods check built-in helper death and reconnection, rejected app-UID handoff, cancelled display creation, and replacement through the virtual clipboard input path. `pairBuiltin` accepts temporary `pairPort` and `pairCode` instrumentation arguments. Keep these out of saved command output and reports.
 
 `screenOffVirtual` turns off the physical screen. It checks virtual input, taps, swipes, screenshots and OCR, then wakes the phone. An optional HTTPS `networkUrl` argument compares the response status before and after screen-off. This short test does not establish deep-Doze or long-running cloud reliability. Reboot recovery and Android 17 local-network permission require separate device acceptance.
@@ -53,6 +55,12 @@ Use real provider credentials to validate cloud requests. Keep keys out of comma
 The lifecycle test deliberately kills the engine process. Accessibility runs in that process. On the S21, Android can retain that service in its crashed-service set while its enabled setting remains present. Before another phone-tool run, switch only PhoneBot's accessibility service off and on in system settings. The validation run restored that binding after fault injection. Normal task cancellation aborts Pi and tool work; it does not kill the process. Process ownership and automatic service recovery need a separate lifecycle change.
 
 ## Validation record
+
+Validated on 2026-11-01 for conversation settings:
+
+- The actual-page regression test reproduced disabled helper rows before the fix. On the updated S21 APK, all four helper and screen choices accepted clicks and showed the selected value. The test checked session values and restored the saved configuration. Read-only engine and version rows exposed no click action.
+- Samsung S21: 4 selected tests passed. They covered conversation settings, screen selection during idle and execution, composer behavior, and session persistence. Provider credentials and global defaults remained intact.
+- JVM: 7 tests passed. `assembleDebug`, `assembleDebugAndroidTest`, `testDebugUnitTest`, and `lintDebug` passed. The APK was installed as an update.
 
 Validated on 2026-11-01 for session screens and device helpers:
 

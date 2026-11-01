@@ -26,6 +26,8 @@ Use a search field, date groups, conversation rows, and a settings footer. Highl
 
 Use one tall sheet with a centered title, back navigation, and Close. Group related rows. Put the icon on the left and the current value on the right. Use inset dividers. Put provider authentication and model selection inside this sheet. Keep credentials out of the conversation.
 
+An arrow indicates navigation. It does not control whether a row can be pressed. Action rows follow their enabled state. Status rows have no click action.
+
 Only add a secondary label when it adds useful context. Permission purposes and Android connection status provide required information. Establish other hierarchy with font size, weight, spacing, and alignment.
 
 Conversation settings choose the helper and screen for the current conversation. New conversations inherit the saved global defaults. Existing conversations retain their choices. Old records use the main screen and Shizuku. Save these fields with the existing chat data. Device authorization stays separate from conversation choices. Basic main-screen tools do not require a helper.

@@ -257,7 +257,7 @@ private val Accent = Color(0xFF88ABFF)
                             SettingsRow(Icons.Outlined.Settings, "设备助手") { panel = "helpers"; model.helperCommand("status") }
                         }
                         SettingsGroup {
-                            SettingsRow(Icons.Outlined.PlayArrow, "引擎", phaseName(engine.phase), arrow = false) {}
+                            SettingsRow(Icons.Outlined.PlayArrow, "引擎", phaseName(engine.phase), arrow = false)
                             InsetDivider()
                             if (engine.canStart) SettingsRow(Icons.Outlined.PlayArrow, "启动引擎") { model.engine.start() }
                             else SettingsRow(Icons.Outlined.Close, "停止引擎", enabled = engine.canStop) { model.engine.stop() }
@@ -265,7 +265,7 @@ private val Accent = Color(0xFF88ABFF)
                             SettingsRow(Icons.Outlined.Refresh, "运行自检", enabled = engine.canRun) { model.engine.probe() }
                         }
                         if (engine.phase == EnginePhase.FAILED || engine.detail.startsWith("Error:")) Text(engine.detail.take(500), color = MaterialTheme.colorScheme.error, fontSize = 13.sp, modifier = Modifier.padding(horizontal = 10.dp))
-                        SettingsGroup { SettingsRow(Icons.Outlined.Info, "版本", "0.2.0", arrow = false) {} }
+                        SettingsGroup { SettingsRow(Icons.Outlined.Info, "版本", "0.2.0", arrow = false) }
                     }
                     panel == "providers" -> ProviderList(model, engine.canRun) { id -> panel = "provider:$id"; model.catalog(id) }
                     panel == "session" -> Column(Modifier.verticalScroll(rememberScrollState()).padding(18.dp), verticalArrangement = Arrangement.spacedBy(24.dp)) {
@@ -362,7 +362,7 @@ private val Accent = Color(0xFF88ABFF)
     Column(Modifier.verticalScroll(rememberScrollState()).padding(18.dp), verticalArrangement = Arrangement.spacedBy(18.dp)) {
         Text("连接由所有会话共享。主屏普通操作只需无障碍权限。", color = Muted, fontSize = 14.sp)
         SettingsGroup {
-            SettingsRow(Icons.Outlined.Settings, "内置助手", helperStateName(state?.optString("state")), arrow = false) {}
+            SettingsRow(Icons.Outlined.Settings, "内置助手", helperStateName(state?.optString("state")), arrow = false)
         }
         state?.optString("message")?.takeIf { it.isNotBlank() }?.let { Text(it, color = Muted, fontSize = 14.sp) }
         if (Build.VERSION.SDK_INT < 31) Text("内置助手需要 Android 12 及以上。", color = Muted, fontSize = 14.sp)
@@ -634,8 +634,10 @@ private fun helperStateName(state: String?): String = when (state) {
     Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(20.dp)).background(Group), content = content)
 }
 @Composable private fun InsetDivider() { HorizontalDivider(Modifier.padding(start = 58.dp), color = Color(0xFF393939), thickness = .5.dp) }
-@Composable private fun SettingsRow(icon: ImageVector, title: String, value: String = "", enabled: Boolean = true, arrow: Boolean = true, click: () -> Unit) {
-    Row(Modifier.fillMaxWidth().heightIn(min = 62.dp).clickable(enabled = enabled && arrow, onClick = click).padding(16.dp, 14.dp), verticalAlignment = Alignment.CenterVertically) {
+@Composable private fun SettingsRow(icon: ImageVector, title: String, value: String = "", enabled: Boolean = true, arrow: Boolean = true, click: (() -> Unit)? = null) {
+    Row(Modifier.fillMaxWidth().heightIn(min = 62.dp)
+        .then(if (click != null) Modifier.clickable(enabled = enabled, onClick = click) else Modifier)
+        .padding(16.dp, 14.dp), verticalAlignment = Alignment.CenterVertically) {
         Icon(icon, null, tint = if (enabled) MaterialTheme.colorScheme.onSurface else Muted, modifier = Modifier.size(24.dp))
         Text(title, Modifier.weight(1f).padding(start = 16.dp, end = 8.dp), fontSize = 17.sp, fontWeight = FontWeight.Medium, color = if (enabled) MaterialTheme.colorScheme.onSurface else Muted)
         if (value.isNotEmpty()) Text(value, fontSize = 14.sp, color = Muted, maxLines = 2, modifier = Modifier.widthIn(max = 110.dp), overflow = TextOverflow.Ellipsis)
