@@ -35,7 +35,7 @@ test("history images have durable references, user images stay visible, and reca
   const jpeg = join(directory, "encoded.jpg");
   await writeFile(jpeg, Buffer.from([255, 216, 255, 217]));
   const png = { type: "image", mimeType: "image/png", data: Buffer.from("original PNG bytes").toString("base64") };
-  const screen = { role: "toolResult", toolName: "screenshot", content: [png] };
+  const screen = { role: "toolResult", toolCallId: "old-screen", toolName: "screenshot", content: [png] };
   const user = { role: "user", content: [png] };
   let encodings = 0;
   const images = imageStore(directory, "session", async (name, params) => {
@@ -43,14 +43,14 @@ test("history images have durable references, user images stay visible, and reca
     assert.equal(await readFile(join(directory, `${params.reference}.source`), "utf8"), "original PNG bytes");
     return { image: jpeg, mimeType: "image/jpeg", width: 576, height: 1280 };
   }, [screen, user]);
-  const first = await images.project([screen, user]);
+  const first = await images.project([structuredClone(screen), user]);
   assert.equal(first[0].content.some((b) => b.type === "image"), false);
   assert.equal(first[1].content.at(-1).mimeType, "image/jpeg");
   const reference = first[0].content[0].text.match(/[a-f0-9]{64}/)[0];
   assert.equal(await readFile(join(directory, `${reference}.source`), "utf8"), "original PNG bytes");
   assert.deepEqual(await images.recall(reference), first[1].content.at(-1));
   assert.equal(encodings, 1);
-  const next = await images.project([screen, user, { role: "toolResult", content: [png] }]);
+  const next = await images.project([screen, user, { role: "toolResult", toolCallId: "new-screen", content: [png] }]);
   assert.deepEqual(next.slice(0, 2), first);
   assert.equal(next[2].content.at(-1).type, "image");
   assert.equal(screen.content[0].mimeType, "image/png");

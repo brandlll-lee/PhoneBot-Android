@@ -3,7 +3,7 @@ import { mkdir, readFile, writeFile, access } from "node:fs/promises";
 import { join } from "node:path";
 
 export function imageStore(directory, session, host, historical = []) {
-  const previous = new Set(historical.filter((m) => m.role === "toolResult"));
+  const previous = new Set(historical.filter((m) => m.role === "toolResult").map((m) => m.toolCallId));
   const messages = new WeakMap(), encoded = new Map();
   async function archive(image) {
     const bytes = Buffer.from(image.data, "base64");
@@ -29,7 +29,7 @@ export function imageStore(directory, session, host, historical = []) {
         if (block.type !== "image") return [block];
         const reference = await archive(block);
         const note = { type: "text", text: `Archived ${message.role === "user" ? "reference" : "screen"} image: ${reference}. Use image_recall to inspect it. Historical images do not describe the current screen.` };
-        return previous.has(message) ? [note] : [note, await recall(reference)];
+        return previous.has(message.toolCallId) ? [note] : [note, await recall(reference)];
       }))).flat() }))());
       return messages.get(message);
     }));

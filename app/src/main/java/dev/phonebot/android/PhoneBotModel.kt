@@ -188,6 +188,7 @@ class PhoneBotModel(application: Application) : AndroidViewModel(application) {
         if (sessions.isEmpty()) newSession() else save()
         selectPhone()
         viewModelScope.launch(Dispatchers.IO) {
+            File(getApplication<Application>().filesDir, "sessions/$id.jsonl").delete()
             File(getApplication<Application>().filesDir, "transcripts/$id.json").delete()
             File(getApplication<Application>().filesDir, "images/$id").deleteRecursively()
             val journal = TaskJournal(journalDirectory)

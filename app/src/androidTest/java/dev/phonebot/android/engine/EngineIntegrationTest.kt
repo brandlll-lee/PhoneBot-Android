@@ -16,7 +16,6 @@ import org.json.JSONObject
 import java.util.concurrent.LinkedBlockingQueue
 import java.util.concurrent.TimeUnit
 import java.io.File
-import org.json.JSONArray
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -80,9 +79,9 @@ class EngineIntegrationTest {
             assertTrue(records.any { it.optString("type") == "task_open" })
             assertTrue(records.any { it.optString("type") == "model_request" })
             assertTrue(records.any { it.optString("type") == "error" })
-            val transcript = File(context.filesDir, "transcripts/journal-test-session.json")
+            val transcript = File(context.filesDir, "sessions/journal-test-session.jsonl")
             assertTrue(transcript.exists())
-            assertTrue(JSONArray(transcript.readText()).length() > 0)
+            assertTrue(transcript.readLines().map(::JSONObject).any { it.optString("type") == "message" })
             assertTrue(!File(context.filesDir, "task-events/journal-failure-test.jsonl").readText().contains("phonebot-instrumentation-key"))
         } finally {
             instrumentation.runOnMainSync { if (engine.state.value.canStop) engine.stop() }
@@ -91,6 +90,7 @@ class EngineIntegrationTest {
             CredentialVault(context).delete("deepseek")
             File(context.filesDir, "task-events/journal-failure-test.jsonl").delete()
             File(context.filesDir, "transcripts/journal-test-session.json").delete()
+            File(context.filesDir, "sessions/journal-test-session.jsonl").delete()
         }
     }
 

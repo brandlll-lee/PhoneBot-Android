@@ -1,4 +1,4 @@
-import { builtinModels } from "@earendil-works/pi-ai/providers/all";
+import { ModelRuntime } from "@earendil-works/pi-coding-agent";
 import { registerBunOAuthFlows } from "@earendil-works/pi-ai/bun-oauth";
 import { setBedrockProviderModule } from "@earendil-works/pi-ai/api/bedrock-converse-stream.lazy";
 import { bedrockProviderModule } from "@earendil-works/pi-ai/bedrock-provider";
@@ -9,7 +9,7 @@ import { join } from "node:path";
 registerBunOAuthFlows();
 setBedrockProviderModule(bedrockProviderModule);
 
-export function providerModels(host, directory) {
+export async function providerModels(host, directory) {
   const locks = new Map();
   const credentials = {
     read: (provider, options) => host("vault_read", { provider }, options?.signal),
@@ -47,5 +47,5 @@ export function providerModels(host, directory) {
     },
     async delete(provider) { await rm(path(provider), { force: true }); },
   } : undefined;
-  return builtinModels({ credentials, modelsStore, identity: { userAgent: { custom: "PhoneBot/0.2.0" } } });
+  return ModelRuntime.create({ credentials, modelsStore, modelsPath: null, refreshOnCreate: false });
 }

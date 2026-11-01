@@ -1,6 +1,6 @@
 import { createServer } from "node:http";
 
-export async function startFixture({ hang = false, fail = false, tool = "runtime_info", params = {}, turns } = {}) {
+export async function startFixture({ hang = false, fail = false, tool = "runtime_info", params = {}, turns, onRequest } = {}) {
   let requests = 0;
   let toolResult;
   let payload;
@@ -10,11 +10,12 @@ export async function startFixture({ hang = false, fail = false, tool = "runtime
     const body = JSON.parse(Buffer.concat(chunks).toString());
     payload = body;
     requests++;
+    onRequest?.(body);
     if (hang) return;
     if (fail) { response.writeHead(401); response.end('{"error":{"message":"Fixture rejected request"}}'); return; }
     toolResult = body.messages.findLast((message) => message.role === "tool")?.content;
     response.writeHead(200, { "Content-Type": "text/event-stream" });
-    const delta = turns?.[requests - 1] ?? (toolResult
+    const delta = (typeof turns === "function" ? turns(body, requests) : turns?.[requests - 1]) ?? (toolResult
       ? { content: `Tool result received: ${toolResult}` }
       : { tool_calls: [{ index: 0, id: "probe-tool", type: "function", function: { name: tool, arguments: JSON.stringify(params) } }] });
     for (const [part, reason] of [[delta, null], [{}, delta.tool_calls ? "tool_calls" : "stop"]]) {

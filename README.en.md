@@ -22,6 +22,7 @@ You give the task. It takes action.
 ## What it can do
 
 - **Choose your model.** Use Pi's providers, model catalog, authentication and request implementations. Switch models above the input. Credentials stay encrypted on your phone.
+- **Keep the conversation going.** Pi manages sessions, restoration and automatic context compaction. Reopen PhoneBot to continue an existing conversation.
 - **Operate your phone.** Open apps, read screens, tap, swipe, enter Chinese text, go Back and go Home. Use Chinese/English OCR or screenshots when needed.
 - **Choose the execution screen.** Operate the main screen or use a separate virtual display. Each conversation saves its screen and helper choice.
 - **Handle everyday settings.** Read and adjust media volume, set brightness and open system settings. Use system apps for alarms, timers and calendar entries.
@@ -115,7 +116,7 @@ Run **设置 → 运行自检** (Settings → Runtime self-check) to test the em
 
 ## Development
 
-PhoneBot uses Kotlin and Jetpack Compose. A separate engine process embeds Node and Pi Agent Core. Pi owns model requests and the agent loop. Kotlin provides Android tools.
+PhoneBot uses Kotlin and Jetpack Compose. A separate engine process embeds Node and the official Pi session SDK. Pi owns model requests, the agent loop, session restoration and automatic compaction. Kotlin provides Android tools.
 
 - [Build guide](docs/build.md): Windows toolchain, APK output and development commands.
 - [Runtime design](docs/runtime.md): processes, Pi integration, tools, permissions and storage.

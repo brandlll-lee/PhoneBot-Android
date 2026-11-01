@@ -22,7 +22,7 @@ JNI sets `HOME`, `TMPDIR`, and the working directory before `node::Start`. Node 
 
 ## Bundling
 
-`scripts/prepare-runtime.mjs` prepares the native libraries and calls `runtime/build.mjs`. esbuild creates one ESM bundle. `builtinModels()` registers all Pi providers. Pi's static OAuth and Bedrock loaders include implementations that use opaque dynamic imports. All provider SDK code stays in the generated bundle.
+`scripts/prepare-runtime.mjs` prepares the native libraries and calls `runtime/build.mjs`. esbuild creates one ESM bundle. Pi's `ModelRuntime` supplies the provider collection. Pi's static OAuth and Bedrock loaders include implementations that use opaque dynamic imports. All provider SDK code stays in the generated bundle.
 
 The build pins Pi packages through `runtime/package-lock.json`. Node comes from the `gmaclennan/nodejs-mobile` maintainer's `v24.18.0-0` release. This release is marked **prerelease**. It is an Android build of Node, not a desktop Node binary. The archive contains matching headers and native libraries. Its SHA-256 is checked before extraction.
 
@@ -102,7 +102,7 @@ Shizuku API/provider 13.1.5 supplies the other transport. The application sets e
 
 ## Task completion
 
-The runtime passes the user's original message to `agent.prompt`. Pi runs tools and returns their results to the model. Its final reply ends the loop. PhoneBot saves the transcript, then publishes that reply as one terminal result. Model errors and cancellation use their own terminal events. A result marks the end of execution, not independent certification of the user's goal.
+The runtime passes the user's original message to `session.prompt`. Pi runs tools and returns their results to the model. Its final reply ends the loop. Pi saves session entries during execution. PhoneBot publishes the final reply after the SDK settles. Model errors and cancellation use their own terminal events. A result marks the end of execution, not independent certification of the user's goal.
 
 Input, system settings, and action postconditions are checked by their tools. The model reads these results and explains the outcome in its final reply. Task IDs identify IPC calls, journal records, and cancellation. Conversation history remains context for the next user message.
 
@@ -110,23 +110,20 @@ Pi's `turn_start` supplies the request sequence. `message_update` forwards `text
 
 ## Task records and model context
 
-`files/task-events/<taskId>.jsonl` is the task journal. Kotlin appends and syncs each event. Runtime stream events are saved on the pipe reader thread before UI delivery. Records include task/session identity, model request start, HTTP response status, first stream event, response duration, token/cache usage, payload size, image budget, tool arguments, complete native results, and substep outcomes. Authentication traffic stays outside this journal. Known credential values and sensitive fields are redacted before persistence. The journal contains page data and remains app-private.
+`files/task-events/<taskId>.jsonl` is the task journal. Kotlin appends and syncs each event. Runtime stream events are saved on the pipe reader thread before UI delivery. Records include task/session identity, model request start, HTTP response status, first stream event, response duration, token/cache usage, payload size, tool arguments, complete native results and substep outcomes. Authentication traffic stays outside this journal. Known credential values and sensitive fields are redacted before persistence. The journal contains page data and remains app-private.
 
 On engine restart, unfinished journals receive an `interrupted` event. Recovery ignores a torn final line and truncates it before appending. The UI rebuilds task turns from these records. Conversation deletion also removes associated journals.
 
-`files/transcripts/<session>.json` preserves Pi messages independently. Each completed message and task exit writes an atomic snapshot, including error and cancellation paths. Loading repairs interrupted tool-call pairs with explicit failure results. This does not execute the missing actions.
+`files/sessions/<session>.jsonl` is the official Pi session. `SessionManager` owns persisted messages and the model context. `createAgentSession` restores it for each task. Existing JSON transcripts are imported in order through `SessionManager`. Import uses a temporary file and publishes the new session before removing the old file. The chat UI and task journal keep their existing formats. Conversation deletion removes the Pi session, image archive and task journals.
 
-`context.mjs` projects history through Pi's `transformContext`. At each task boundary, prior tasks become conversation text and historical tool facts. Their screen arrays, element IDs, coordinates, and tool calls stay in the transcript. They do not serve as current targets in the next request. Historical facts retain dispatch and condition outcomes, system-tool data, and image recall references. User reference images remain available. Pi receives the original current user message and the current task's complete tool rounds.
+`AgentSession` owns the execution loop, cancellation, provider retries and automatic compaction. PhoneBot registers its phone tools as custom tools and uses sequential execution. The SDK's built-in desktop tools and resource discovery are disabled. The current screen instructions come from the Android session. Model authentication uses Pi's `ModelRuntime` with the Android encrypted credential store.
 
-The restored conversation count excludes system messages. Pi inserts the current system message with its tool declarations before projection. The projection counts conversation messages to locate the task boundary. Both task-boundary projection and pressure-driven compression preserve system messages unchanged and in order. This includes Pi's tool declarations. Pi's transport resolves them into each provider's request format.
+Pi uses its default compaction settings. It summarizes earlier context and retains recent messages when the model context approaches its limit. The session file retains original entries and the compaction entry. Session recovery and subsequent compaction use Pi's canonical projection. System messages and tool declarations stay under Pi's control. Context summaries come from the configured model. A summary may need an additional model request.
 
-Normal requests within a task preserve their existing prefix and use a stable session ID. Estimated input above 60% of the context window triggers summaries of old tool outcomes and target arguments. Summaries distinguish dispatch from condition satisfaction. Compression keeps four, two, or one recent complete tool rounds as needed. The materialized full baseline for retained diffs survives. The original Pi history is preserved. Input estimates are calibrated from provider usage. Output space is reserved. An input that still exceeds the estimated capacity fails with a clear error.
+`images.mjs` uses the SDK's `context` extension event for image preparation. It archives original bytes under `files/images/<session>/<sha256>.source`. Previous tasks' tool images become text references. User reference images remain visible. `image_recall` restores a referenced image when needed. Current tool images, recalled images and user images pass through the same Android JPEG encoder and dimension checks. Encoded images have a longest edge of 1280 and quality 80. Per-task caches preserve the request prefix. Text history and compaction stay with Pi. The provider owns its request limits.
 
-Images follow model catalog limits and local budgets of eight images and 4 MiB of encoded image data per request. The projection checks per-message counts and decoded image bytes. Old tool images become placeholders when needed. User input is retained. User images that exceed these limits produce an error. Pi's payload hook checks the serialized request against the catalog's byte limit before transport. Unknown provider limits remain unknown. The provider still owns its final acceptance limits.
+The runtime publishes one terminal result after `session.prompt()` settles. Compaction and automatic retry events enter the task journal. Compaction events contain status and token counts; the full summary stays in the Pi session file. The service records notification attempts by task ID after the terminal event. Live user-task terminal events can post a result notification; event replay does not. Shutdown and interruption use the same notification path.
 
-`images.mjs` prepares images before context projection. It archives original bytes under `files/images/<session>/<sha256>.source`. Previous tasks' tool images become text references. User reference images remain visible. `image_recall` restores a referenced image when needed. Current tool images, recalled images, and user images pass through the same Android JPEG encoder and dimension checks. Encoded images have a longest edge of 1280 and quality 80. Per-task caches preserve the request prefix. Context summaries retain image references. Transcript source bytes remain unchanged. Deleting a conversation removes its image archive.
-
-The runtime saves its final transcript before sending one terminal result. A final save failure produces an error instead of a success followed by an error. The service records notification attempts by task ID after the terminal event. Live user-task terminal events can post a result notification; event replay does not. Shutdown and interruption use the same notification path.
 
 ## Verification
 
@@ -134,13 +131,13 @@ Self-check starts an HTTP fixture on a random loopback port. Pi's real OpenAI tr
 
 The fixture provides a deterministic model response. It tests runtime compatibility and the request/tool bridge. It does not establish cloud provider compatibility.
 
-Connection verification uses the selected Pi model and saved credentials. It sends a short text request. Real tasks use the same provider collection and a fresh Pi Agent with saved session context.
+Connection verification uses the selected Pi model and saved credentials. It sends a short text request. Real tasks use the same model runtime and an official Pi session restored from its JSONL file.
 
 ## Primary sources
 
 Checked on 2026-10-31. Read the linked source again when changing the related dependency or API.
 
-Rechecked on 2026-11-01: Pi's `transformContext` contract and Android node parent/child, selected, checked, scrollable, and action-result APIs.
+Rechecked on 2026-11-01: Pi's session SDK, model runtime, automatic compaction and session persistence. Android node parent/child, selected, checked, scrollable and action-result APIs remain unchanged.
 
 Pi 1.4.0's [Agent initialization](https://github.com/earendil-works/pi/blob/v1.4.0/packages/agent/src/agent.ts) inserts the leading system message. Its [transcript functions](https://github.com/earendil-works/pi/blob/v1.4.0/packages/ai/src/utils/transcript.ts) carry tool declarations in system messages and resolve them in transcript order.
 
@@ -152,6 +149,9 @@ Pi 1.4.0's [Agent initialization](https://github.com/earendil-works/pi/blob/v1.4
 - [Service manifest](https://developer.android.com/guide/topics/manifest/service-element): private process names and exported service control.
 - [Android 16 KB page sizes](https://developer.android.com/guide/practices/page-sizes): ELF and APK alignment requirements.
 - [Pi Agent Core 1.4.0](https://github.com/earendil-works/pi/tree/v1.4.0/packages/agent): agent lifecycle and tool execution.
+- [Pi session SDK](https://github.com/earendil-works/pi/blob/v1.4.0/packages/coding-agent/docs/sdk.md): session factory, custom tools, resource loading and model runtime.
+- [Pi compaction](https://github.com/earendil-works/pi/blob/v1.4.0/packages/coding-agent/docs/compaction.md): automatic thresholds, summaries, retained messages and overflow recovery.
+- [Pi SessionManager](https://github.com/earendil-works/pi/blob/v1.4.0/packages/coding-agent/src/core/session-manager.ts): JSONL persistence, canonical projection and session restoration.
 - [Pi AI 1.4.0](https://github.com/earendil-works/pi/tree/v1.4.0/packages/ai): model providers, authentication, and request APIs.
 - [Android Keystore](https://developer.android.com/privacy-and-security/keystore): encryption-key generation and storage.
 - [AccessibilityService](https://developer.android.com/reference/android/accessibilityservice/AccessibilityService): window access, screenshots, gestures, and global actions.

@@ -9,7 +9,7 @@ await mkdir(output, { recursive: true });
 const result = await build({
   entryPoints: ["src/main.mjs"], outfile: "dist/engine.mjs",
   bundle: true, platform: "node", format: "esm", target: "node24",
-  banner: { js: "import {createRequire} from 'node:module'; const require=createRequire(import.meta.url);" },
+  banner: { js: "import {createRequire as runtimeCreateRequire} from 'node:module'; const require=runtimeCreateRequire(import.meta.url);" },
   legalComments: "eof", metafile: true,
 });
 await copyFile("dist/engine.mjs", new URL("engine.mjs", output));
