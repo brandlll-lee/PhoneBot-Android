@@ -8,6 +8,16 @@ The chat is the first screen. Use a black or white background. `PhoneBotTheme` o
 
 The header uses two outlined circular controls and a central Logo + My phonebot pill. The left control opens conversations. The right menu opens New conversation and Settings. The central pill opens conversation settings.
 
+## Logo
+
+The logo uses a rounded phone frame, a speaker, two rounded eyes and a gesture bar. `docs/assets/phonebot-black.svg` owns the geometry. Run `node scripts/prepare-brand.mjs` to generate the white SVG, animated SVG, native drawing geometry, notification mark and adaptive launcher layers. `scripts/prepare-runtime.mjs` also runs this step. Both READMEs use the static SVGs through a light/dark picture element.
+
+`PhoneBotLogo` uses native Compose animation. It blinks at rest. During work, its eyes look slightly sideways and the body breathes. Pressing the existing header or floating control triggers a wink and nod. Keep the parent's click action and accessibility semantics. Stop animation below the STARTED lifecycle state. A zero system motion scale restores the static face. Read animated values in drawing, not layout. The launcher and notification icons remain static. The standalone animated SVG follows browser color and reduced-motion preferences.
+
+Use the official [Compose animation APIs](https://developer.android.com/develop/ui/compose/animation/quick-guide), [motion scale](https://developer.android.com/reference/kotlin/androidx/compose/ui/MotionDurationScale) and [adaptive-icon safe zone](https://developer.android.com/develop/ui/compose/system/icon_design_adaptive). Keep launcher geometry inside the central 66 × 66 dp area of its 108 dp layer.
+
+## Chat controls
+
 Align user messages to the right in subtle rounded bubbles. Render Pi's reply in a subtle full-width bubble as text arrives. If Pi starts a tool call, move that message into the execution trace. Pi's terminal event commits the final reply. Keep intermediate text, provider-returned thinking, tool calls, tool results, screenshots, and errors inside one expandable execution trace. Preserve Pi's message and tool order. Use a thin vertical line, small gray status dots, green completed-tool dots and red error dots. Tool details open an inset input/output panel. Expand the trace during execution and collapse it when execution ends. Keep the composer above the keyboard and system navigation area. Replace Send with Stop during a task. Give each icon an accessible name and a 48 dp touch target.
 
 Put each trace step in its own native lazy-list item. Use stable keys and content types. Expanded records must compose only nearby rows. Trace controls use native interaction state for text-color feedback on press, hover and focus. Keep their backgrounds unchanged. Follow the official [lazy-list guidance](https://developer.android.com/develop/ui/compose/lists) and [interaction APIs](https://developer.android.com/develop/ui/compose/touch-input/user-interactions/handling-interactions).

@@ -1,13 +1,10 @@
 package dev.phonebot.android
 
 import androidx.compose.foundation.isSystemInDarkTheme
-import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
-import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -102,8 +99,4 @@ private val PhoneTypography = Typography(
     MaterialTheme(colorScheme = if (dark) DarkColors else LightColors, typography = PhoneTypography,
         shapes = Shapes(small = RoundedCornerShape(8.dp), medium = RoundedCornerShape(16.dp), large = RoundedCornerShape(24.dp), extraLarge = RoundedCornerShape(28.dp)),
         content = content)
-}
-
-@Composable internal fun PhoneBotLogo(modifier: Modifier = Modifier) {
-    Icon(painterResource(R.drawable.ic_phonebot_mark), null, modifier.size(PhoneUi.logo), tint = MaterialTheme.colorScheme.onBackground)
 }

@@ -38,6 +38,8 @@ Session settings tests use separate storage. They check old-session defaults, sa
 
 `ThemeTest` renders chat, Markdown, menus and the composer in both palettes. It checks the actual background pixels and system appearance changes. It saves local PNGs for visual inspection. `ConversationSettingsTest#appearanceChangesPersistAndUpdateSystemBars` checks the real settings page, saved selection and status-bar icons. It restores the original appearance.
 
+`LogoTest` checks the phone frame, eyes, speaker and gesture bar in both palettes. It checks the adaptive launcher and monochrome layer. A controlled Compose clock checks work and press motion, lifecycle suspension and zero system motion scale. Run `node scripts/prepare-brand.mjs` and confirm that generated assets stay unchanged.
+
 `TraceTest` opens 200 tool steps and checks that only nearby rows are composed. It scrolls to the last result and collapses the trace. Its press test waits for native interaction feedback, checks blue text and verifies that the background stays unchanged. `PresentationTest#replyStreamsAndMovesToolTextIntoTheTrace` checks streamed reply text, tool-call transitions, finalization and cancellation through the same event projection used by journal replay.
 
 Run the full suite on a test installation. The authentication test changes provider credentials and the default model. For the user's configured phone, select only the controlled page test:
@@ -63,6 +65,12 @@ Use real provider credentials to validate cloud requests. Keep keys out of comma
 The lifecycle test deliberately kills the engine process. Accessibility runs in that process. On the S21, Android can retain that service in its crashed-service set while its enabled setting remains present. Before another phone-tool run, switch only PhoneBot's accessibility service off and on in system settings. The validation run restored that binding after fault injection. Normal task cancellation aborts Pi and tool work; it does not kill the process. Process ownership and automatic service recovery need a separate lifecycle change.
 
 ## Validation record
+
+Validated on 2026-11-02 for the PhoneBot logo:
+
+- Runtime: 22 tests passed. JVM: 7 tests passed. APK builds, lint and ZIP alignment passed. Brand generation reproduced all eight assets. The source SVG matched the approved geometry and adaptive-icon safe zone.
+- Samsung S21, Android 14, ARM64: 18 selected tests passed. They covered both logo palettes, launcher and monochrome layers, work and press animation, lifecycle suspension, zero motion scale, chat, Markdown, composer, settings, navigation and floating windows. Seven selected checks also passed at 1.3 font scale. The tests restored font scale and preserved model credentials. The APK was installed as an update.
+- Screenshots of light/dark chat and the main/virtual floating windows were inspected. Tests used controlled pages. A cloud task and release-build animation profiling were not run.
 
 Validated on 2026-11-01 for themes and live task UI:
 

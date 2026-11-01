@@ -12,6 +12,7 @@ import androidx.core.view.WindowCompat
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -307,13 +308,14 @@ class MainActivity : ComponentActivity() {
 
 @Composable internal fun ChatHeader(idle: Boolean, conversations: () -> Unit, session: () -> Unit, newChat: () -> Unit, settings: () -> Unit) {
     var menu by remember { mutableStateOf(false) }
+    val identity = remember { MutableInteractionSource() }
     Row(Modifier.fillMaxWidth().padding(horizontal = PhoneUi.inset, vertical = PhoneUi.small),
         verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(PhoneUi.small)) {
         ToolIcon(Icons.Outlined.Menu, "打开对话列表", conversations, filled = true)
-        Surface(onClick = session, modifier = Modifier.weight(1f).heightIn(min = PhoneUi.touch).testTag("chat_identity"),
+        Surface(onClick = session, interactionSource = identity, modifier = Modifier.weight(1f).heightIn(min = PhoneUi.touch).testTag("chat_identity"),
             shape = CircleShape, color = MaterialTheme.colorScheme.background, border = BorderStroke(PhoneUi.hairline, MaterialTheme.colorScheme.outlineVariant)) {
             Row(Modifier.padding(horizontal = PhoneUi.inset), horizontalArrangement = Arrangement.spacedBy(PhoneUi.small, Alignment.CenterHorizontally), verticalAlignment = Alignment.CenterVertically) {
-                PhoneBotLogo()
+                PhoneBotLogo(working = !idle, interactionSource = identity)
                 Text("My phonebot", style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
         }

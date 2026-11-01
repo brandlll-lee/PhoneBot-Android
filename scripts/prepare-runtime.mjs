@@ -5,6 +5,7 @@ import { resolve } from "node:path";
 import { execFileSync } from "node:child_process";
 
 const root = resolve(import.meta.dirname, "..");
+await import("./prepare-brand.mjs");
 const tools = resolve(root, ".tools");
 const archive = resolve(tools, "nodejs-mobile-android-24.18.0-0.zip");
 const extracted = resolve(tools, "node-mobile-24.18.0-0");

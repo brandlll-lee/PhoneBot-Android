@@ -1,5 +1,12 @@
 <p align="center"><a href="README.md">简体中文</a> · English</p>
 
+<p align="center">
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/phonebot-white.svg" />
+  <img src="docs/assets/phonebot-black.svg" width="112" height="112" alt="PhoneBot" />
+</picture>
+</p>
+
 <h1 align="center">PhoneBot</h1>
 <h3 align="center">Your AI can use your phone now.</h3>
 

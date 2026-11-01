@@ -104,7 +104,7 @@ class EngineService : Service() {
             val notification = Notification.Builder(this, "engine")
                 .setContentTitle("PhoneBot")
                 .setContentText("Engine is active")
-                .setSmallIcon(android.R.drawable.stat_notify_sync)
+                .setSmallIcon(dev.phonebot.android.R.drawable.ic_phonebot_mark)
                 .setContentIntent(open).setOngoing(true)
                 .addAction(Notification.Action.Builder(null, "Stop", stop).build()).build()
             val type = if (Build.VERSION.SDK_INT >= 34) ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE else 0

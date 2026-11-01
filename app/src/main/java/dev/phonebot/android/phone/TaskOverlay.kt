@@ -16,6 +16,7 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.*
@@ -144,11 +145,12 @@ internal class TaskOverlay(private val service: PhoneAccessibilityService) : Sav
 
     @Composable private fun Bubble(onClick: () -> Unit) {
         val colors = MaterialTheme.colorScheme
-        Box(Modifier.size(PhoneUi.touch).clickable(onClick = onClick).testTag("task-overlay")
+        val interaction = remember { MutableInteractionSource() }
+        Box(Modifier.size(PhoneUi.touch).clickable(interaction, indication = null, onClick = onClick).testTag("task-overlay")
             .semantics { contentDescription = if (display?.virtual == true) "查看 Agent 屏幕" else "返回当前会话" }, contentAlignment = Alignment.Center) {
             Box(Modifier.size(PhoneUi.bubble).clip(CircleShape).background(colors.background)
                 .border(PhoneUi.hairline, colors.outlineVariant, CircleShape), contentAlignment = Alignment.Center) {
-                PhoneBotLogo()
+                PhoneBotLogo(working = true, interactionSource = interaction)
             }
             Box(Modifier.align(Alignment.BottomEnd).padding(PhoneUi.tiny).size(PhoneUi.activityDot)
                 .background(colors.tertiary, CircleShape).border(PhoneUi.frameLine, colors.background, CircleShape))

@@ -40,7 +40,7 @@ internal object TaskNotifications {
         if (!allowed) return false
         val pending = PendingIntent.getActivity(context, 0, open(context, start), PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
         val summary = MarkdownAnswer.plain(event.optString("text", event.optString("message"))).take(240)
-        val notification = Notification.Builder(context, CHANNEL).setSmallIcon(R.drawable.ic_notification)
+        val notification = Notification.Builder(context, CHANNEL).setSmallIcon(R.drawable.ic_phonebot_mark)
             .setContentTitle("$title · ${start.getString("prompt").take(40)}")
             .setContentText(summary).setStyle(Notification.BigTextStyle().bigText(summary))
             .setVisibility(Notification.VISIBILITY_PRIVATE).setContentIntent(pending).setAutoCancel(true).setOnlyAlertOnce(true).build()

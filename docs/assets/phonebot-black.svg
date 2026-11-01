@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256" role="img" aria-labelledby="title">
+  <title id="title">PhoneBot</title>
+  <rect id="body" x="48" y="28" width="160" height="200" rx="40" fill="#000000"/>
+  <rect id="screen" x="58" y="38" width="140" height="180" rx="30" fill="#FFFFFF"/>
+  <rect id="speaker" x="104" y="48" width="48" height="10" rx="5" fill="#000000"/>
+  <rect id="eye-left" x="88" y="106" width="28" height="36" rx="14" fill="#000000"/>
+  <rect id="eye-right" x="140" y="106" width="28" height="36" rx="14" fill="#000000"/>
+  <rect id="gesture" x="110" y="200" width="36" height="5" rx="2.5" fill="#000000"/>
+</svg>
