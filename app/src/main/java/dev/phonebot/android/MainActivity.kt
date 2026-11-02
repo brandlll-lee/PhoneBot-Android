@@ -18,7 +18,6 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.foundation.text.BasicTextField
@@ -36,7 +35,6 @@ import androidx.compose.material.icons.outlined.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
-import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.runtime.saveable.mapSaver
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -113,7 +111,6 @@ class MainActivity : ComponentActivity() {
     val drafts = rememberSaveable(saver = mapSaver<androidx.compose.runtime.snapshots.SnapshotStateMap<String, String>>(
         save = { it.toMap() }, restore = { values -> values.map { it.key to it.value as String }.toMutableStateMap() },
     )) { mutableStateMapOf<String, String>() }
-    val stateHolder = rememberSaveableStateHolder()
     LaunchedEffect(model.focusedTask) {
         if (model.focusedTask.isNotEmpty()) { panel = ""; drawer.close() }
     }
@@ -182,8 +179,8 @@ class MainActivity : ComponentActivity() {
             var topHeight by remember { mutableIntStateOf(0) }
             var bottomHeight by remember { mutableIntStateOf(0) }
             Box(Modifier.fillMaxSize().padding(padding).consumeWindowInsets(padding).imePadding()) {
-                stateHolder.SaveableStateProvider(model.selectedSession) {
-                    val list = rememberLazyListState()
+                key(model.selectedSession) {
+                    val list = remember { androidx.compose.foundation.lazy.LazyListState() }
                     val turns = model.session?.turns.orEmpty()
                     if (turns.isEmpty()) Box(Modifier.fillMaxSize().hazeSource(haze), contentAlignment = Alignment.Center) {
                         Text(model.session?.title ?: "PhoneBot", style = MaterialTheme.typography.headlineLarge)
@@ -227,8 +224,8 @@ class MainActivity : ComponentActivity() {
     }
     if (panel.isNotEmpty()) {
         ModalBottomSheet(onDismissRequest = { panel = "" }, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
-            containerColor = MaterialTheme.colorScheme.surface, dragHandle = null, shape = MaterialTheme.shapes.extraLarge) {
-            Column(Modifier.fillMaxWidth().fillMaxHeight(.94f).imePadding()) {
+            sheetGesturesEnabled = false, containerColor = MaterialTheme.colorScheme.surface, dragHandle = null, shape = MaterialTheme.shapes.extraLarge) {
+            Column(Modifier.fillMaxWidth().fillMaxHeight(.94f).testTag("settings_sheet")) {
                 val providerId = panel.removePrefix("provider:")
                 val title = when {
                     panel == "settings" -> "设置"
@@ -246,7 +243,7 @@ class MainActivity : ComponentActivity() {
                     Text(title, Modifier.weight(1f), textAlign = androidx.compose.ui.text.style.TextAlign.Center, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold, maxLines = 2)
                     ToolIcon(Icons.Outlined.Close, "关闭设置", { panel = "" }, filled = true)
                 }
-                when {
+                Box(Modifier.weight(1f).fillMaxWidth().testTag("settings_body")) { when {
                     panel == "settings" -> Column(Modifier.verticalScroll(rememberScrollState()).padding(PhoneUi.space), verticalArrangement = Arrangement.spacedBy(PhoneUi.gap)) {
                         SettingsGroup {
                             SettingsRow(Icons.Outlined.AccountCircle, "模型服务", model.providers.find { it.id == model.provider }?.name.orEmpty()) { panel = "providers"; model.catalog() }
@@ -318,7 +315,7 @@ class MainActivity : ComponentActivity() {
                         }
                     }
                     else -> ProviderDetail(model, providerId, engine.canRun)
-                }
+                } }
             }
         }
     }
@@ -348,11 +345,13 @@ class MainActivity : ComponentActivity() {
     Row(Modifier.fillMaxWidth().padding(horizontal = PhoneUi.inset, vertical = PhoneUi.small),
         verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(PhoneUi.small)) {
         ToolIcon(Icons.Outlined.Menu, "打开对话列表", conversations, filled = true)
-        Surface(onClick = session, interactionSource = identity, modifier = Modifier.weight(1f).heightIn(min = PhoneUi.touch).testTag("chat_identity"),
-            shape = CircleShape, color = MaterialTheme.colorScheme.background.copy(alpha = PhoneUi.glassAlpha), shadowElevation = PhoneUi.floatingElevation, border = BorderStroke(PhoneUi.hairline, MaterialTheme.colorScheme.outlineVariant)) {
-            Row(Modifier.padding(horizontal = PhoneUi.inset), horizontalArrangement = Arrangement.spacedBy(PhoneUi.small, Alignment.CenterHorizontally), verticalAlignment = Alignment.CenterVertically) {
-                BotAvatar(bot?.avatarColor ?: 0xFF3985FF, Modifier.size(PhoneUi.logo), working = !idle, interactionSource = identity)
-                Text(bot?.title ?: "PhoneBot", style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        Box(Modifier.weight(1f), contentAlignment = Alignment.Center) {
+            Surface(onClick = session, interactionSource = identity, modifier = Modifier.heightIn(min = PhoneUi.touch).testTag("chat_identity"),
+                shape = CircleShape, color = MaterialTheme.colorScheme.background.copy(alpha = PhoneUi.glassAlpha), shadowElevation = PhoneUi.floatingElevation, border = BorderStroke(PhoneUi.hairline, MaterialTheme.colorScheme.outlineVariant)) {
+                Row(Modifier.padding(horizontal = PhoneUi.inset), horizontalArrangement = Arrangement.spacedBy(PhoneUi.small, Alignment.CenterHorizontally), verticalAlignment = Alignment.CenterVertically) {
+                    BotAvatar(bot?.avatarColor ?: 0L, Modifier.size(PhoneUi.logo), working = !idle, interactionSource = identity)
+                    Text(bot?.title ?: "PhoneBot", modifier = Modifier.weight(1f, fill = false), style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                }
             }
         }
         Box {
@@ -463,7 +462,8 @@ private fun helperStateName(state: String?): String = when (state) {
         if (model.providers.isEmpty()) LinearProgressIndicator(Modifier.fillMaxWidth())
         LazyColumn {
             items(model.providers.filter { it.name.contains(search, true) || it.id.contains(search, true) }, key = { it.id }) { provider ->
-                SettingsRow(Icons.Outlined.AccountCircle, provider.name, if (provider.configured) "已配置" else "", enabled = ready) { select(provider.id) }
+                SettingsRow(title = provider.name, value = if (provider.configured) "已配置" else "", enabled = ready,
+                    leading = { ProviderIcon(provider.id) }) { select(provider.id) }
                 InsetDivider()
             }
         }
@@ -549,11 +549,12 @@ private fun helperStateName(state: String?): String = when (state) {
     Column(Modifier.fillMaxWidth().clip(MaterialTheme.shapes.large).background(MaterialTheme.colorScheme.surfaceContainer), content = content)
 }
 @Composable private fun InsetDivider() { HorizontalDivider(Modifier.padding(start = PhoneUi.rowLeadingInset), color = MaterialTheme.colorScheme.outlineVariant, thickness = PhoneUi.hairline) }
-@Composable private fun SettingsRow(icon: ImageVector, title: String, value: String = "", enabled: Boolean = true, arrow: Boolean = true, click: (() -> Unit)? = null) {
+@Composable private fun SettingsRow(icon: ImageVector? = null, title: String, value: String = "", enabled: Boolean = true, arrow: Boolean = true,
+    leading: (@Composable () -> Unit)? = null, click: (() -> Unit)? = null) {
     Row(Modifier.fillMaxWidth().heightIn(min = PhoneUi.rowHeight)
         .then(if (click != null) Modifier.clickable(enabled = enabled, onClick = click) else Modifier)
         .padding(PhoneUi.space, PhoneUi.space), verticalAlignment = Alignment.CenterVertically) {
-        Icon(icon, null, tint = if (enabled) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(PhoneUi.icon))
+        if (leading != null) leading() else if (icon != null) Icon(icon, null, tint = if (enabled) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(PhoneUi.icon))
         Text(title, Modifier.weight(1f).padding(start = PhoneUi.space, end = PhoneUi.small), style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Medium, color = if (enabled) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant)
         if (value.isNotEmpty()) Text(value, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 2, modifier = Modifier.widthIn(max = PhoneUi.rowValueWidth), overflow = TextOverflow.Ellipsis)
         if (arrow) Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(start = PhoneUi.small).size(PhoneUi.icon))

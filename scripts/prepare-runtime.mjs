@@ -6,6 +6,7 @@ import { execFileSync } from "node:child_process";
 
 const root = resolve(import.meta.dirname, "..");
 await import("./prepare-brand.mjs");
+await import("./prepare-provider-icons.mjs");
 const tools = resolve(root, ".tools");
 const archive = resolve(tools, "nodejs-mobile-android-24.18.0-0.zip");
 const extracted = resolve(tools, "node-mobile-24.18.0-0");
@@ -42,3 +43,4 @@ if (createHash("sha256").update(await readFile(nodeLicense)).digest("hex") !== "
   throw new Error("Node license checksum does not match");
 }
 await cp(nodeLicense, resolve(root, "app/src/main/assets/runtime/node-notices.txt"));
+await cp(resolve(root, "docs/assets/providers/LICENSE"), resolve(root, "app/src/main/assets/runtime/provider-notices.txt"));

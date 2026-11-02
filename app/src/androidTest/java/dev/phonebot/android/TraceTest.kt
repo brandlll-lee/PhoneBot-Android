@@ -4,6 +4,8 @@ import android.util.Log
 import androidx.compose.foundation.layout.*
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
+import androidx.compose.runtime.*
+import androidx.compose.ui.unit.dp
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.toPixelMap
 import androidx.compose.ui.test.*
@@ -14,6 +16,58 @@ import org.junit.Test
 
 class TraceTest {
     @get:Rule val compose = createComposeRule()
+
+    @Test fun latestReplyStartsAtItsEndAndHistoryStaysInPlace() {
+        val turns = mutableStateOf((1..20).map { index -> ChatTurn("latest-$index", "任务 $index", status = "done",
+            answer = (1..40).joinToString("\n\n") { "第 $index 项，第 $it 段内容。" } + "\n\n末段 $index") })
+        compose.setContent { PhoneBotTheme { Surface(Modifier.fillMaxSize()) {
+            ChatMessages(turns.value, "", Modifier.fillMaxSize())
+        } } }
+        compose.onNodeWithText("末段 20", substring = true).assertIsDisplayed()
+        compose.onNodeWithTag("chat_messages").performScrollToNode(hasText("任务 10"))
+        compose.runOnIdle { turns.value = turns.value + ChatTurn("latest-21", "任务 21", status = "done", answer = "新结果") }
+        compose.onNodeWithText("任务 10").assertIsDisplayed()
+    }
+
+    @Test fun foldingKeepsTheTitleInPlace() {
+        val turn = ChatTurn("timing", "检查执行过程", status = "done",
+            answer = (1..30).joinToString("\n\n") { "**结果 $it**：保留当前页面内容与中文输出。" },
+            steps = (1..200).map { TaskStep("timing-$it", "读取页面 $it", detail = "页面内容 $it", done = true) })
+        compose.setContent { PhoneBotTheme { Surface(Modifier.fillMaxSize()) {
+            ChatMessages(listOf(turn), "", Modifier.fillMaxSize(), focusedTask = turn.id,
+                contentPadding = PaddingValues(horizontal = 16.dp, vertical = 80.dp))
+        } } }
+        compose.onNodeWithTag("chat_messages").performScrollToNode(hasTestTag("execution_toggle"))
+        repeat(3) {
+            val top = compose.onNodeWithTag("execution_toggle").getUnclippedBoundsInRoot().top
+            compose.onNodeWithTag("execution_toggle").performClick()
+            compose.onNodeWithTag("execution_trace").assertIsDisplayed()
+            assertEquals(top.value, compose.onNodeWithTag("execution_toggle").getUnclippedBoundsInRoot().top.value, 1f)
+            compose.onNodeWithTag("execution_toggle").performClick()
+            compose.onNodeWithTag("tool-timing-1").assertDoesNotExist()
+            assertEquals(top.value, compose.onNodeWithTag("execution_toggle").getUnclippedBoundsInRoot().top.value, 1f)
+        }
+    }
+
+    @Test fun expandingTheLatestTraceKeepsEarlierMessagesInPlace() {
+        val list = androidx.compose.foundation.lazy.LazyListState()
+        val turns = (1..8).map { index -> ChatTurn("anchor-$index", "第 $index 个请求", status = "done",
+            answer = if (index == 8) "" else "第 $index 个结果。".repeat(10),
+            steps = (1..40).map { TaskStep("anchor-$index-$it", "工具 $index/$it", done = true) }) }
+        compose.setContent { PhoneBotTheme { Surface(Modifier.fillMaxSize()) {
+            ChatMessages(turns, "", Modifier.fillMaxSize(), list)
+        } } }
+        compose.runOnIdle { list.requestScrollToItem(0, -list.layoutInfo.viewportEndOffset / 2) }
+        val toggle = compose.onAllNodesWithTag("execution_toggle").onFirst()
+        val prompt = compose.onNodeWithText("第 8 个请求")
+        val titleTop = toggle.getUnclippedBoundsInRoot().top
+        val promptTop = prompt.getUnclippedBoundsInRoot().top
+        repeat(3) {
+            toggle.performClick()
+            assertEquals(titleTop.value, toggle.getUnclippedBoundsInRoot().top.value, 1f)
+            assertEquals(promptTop.value, prompt.getUnclippedBoundsInRoot().top.value, 1f)
+        }
+    }
 
     @Test fun expansionComposesVisibleSteps() {
         val turn = ChatTurn("trace-load", "检查执行过程", status = "done", answer = "执行结束。",

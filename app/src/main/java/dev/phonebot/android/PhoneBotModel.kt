@@ -30,7 +30,7 @@ data class TaskStep(val id: String, val name: String, val args: String = "", val
     val kind: String = "tool", val request: Int = 0)
 data class ChatTurn(val id: String, val prompt: String, val answer: String = "", val steps: List<TaskStep> = emptyList(), val status: String = "running", val image: String = "", val streamText: String = "")
 data class ChatSession(val id: String = UUID.randomUUID().toString(), val title: String = "新 Bot", val updated: Long = System.currentTimeMillis(), val turns: List<ChatTurn> = emptyList(),
-    val helper: String = "shizuku", val screen: String = "main", val provider: String = "", val model: String = "", val avatarColor: Long = 0xFF3985FF)
+    val helper: String = "shizuku", val screen: String = "main", val provider: String = "", val model: String = "", val avatarColor: Long = 0L)
 data class PiProvider(val id: String, val name: String, val count: Int, val configured: Boolean, val auth: List<Pair<String, String>>, val ambient: Boolean)
 data class PiModel(val id: String, val name: String, val image: Boolean)
 
@@ -116,7 +116,7 @@ class PhoneBotModel(application: Application) : AndroidViewModel(application) {
                                     it.optString("kind", "tool"), it.optInt("request")) },
                                 turn.optString("status").let { if (it == "running") "interrupted" else it }, turn.optString("image"))
                         }, value.optString("helper", "shizuku"), value.optString("screen", "main"),
-                            value.optString("provider", preferences.getString("provider", "").orEmpty()), value.optString("model", preferences.getString("model", "").orEmpty()), value.optLong("avatarColor", 0xFF3985FF))
+                            value.optString("provider", preferences.getString("provider", "").orEmpty()), value.optString("model", preferences.getString("model", "").orEmpty()), value.optLong("avatarColor", 0L))
                     }
                     val journal = TaskJournal(journalDirectory)
                     journalDirectory.listFiles()?.filter { it.extension == "jsonl" }?.sortedBy { it.lastModified() }?.forEach { file ->
@@ -127,7 +127,7 @@ class PhoneBotModel(application: Application) : AndroidViewModel(application) {
                         events.forEach { turn = turn.event(it) }
                         if (turn.status == "running") turn = turn.copy(status = "interrupted")
                         val session = restored.find { it.id == id } ?: ChatSession(id, start.optString("botName", "PhoneBot"), start.optLong("time"), helper = start.optString("helper", "shizuku"), screen = start.optString("screen", "main"),
-                            provider = start.optString("provider"), model = start.optString("model"), avatarColor = start.optLong("avatarColor", 0xFF3985FF))
+                            provider = start.optString("provider"), model = start.optString("model"), avatarColor = start.optLong("avatarColor", 0L))
                         restored = restored.filterNot { it.id == id } + session.copy(turns = session.turns.filterNot { it.id == turn.id } + turn)
                     }
                     restored.sortedByDescending { it.updated }
@@ -216,7 +216,7 @@ class PhoneBotModel(application: Application) : AndroidViewModel(application) {
         sessions = sessions.map { if (it.id == selectedSession) it.copy(provider = providerId, model = modelId) else it }
         save()
     }
-    fun editBot(name: String = session?.title.orEmpty(), color: Long = session?.avatarColor ?: 0xFF3985FF) {
+    fun editBot(name: String = session?.title.orEmpty(), color: Long = session?.avatarColor ?: 0L) {
         if (activeTask.isNotEmpty() || name.isBlank()) return
         sessions = sessions.map { if (it.id == selectedSession) it.copy(title = name.trim(), avatarColor = color) else it }
         save()
@@ -281,7 +281,7 @@ class PhoneBotModel(application: Application) : AndroidViewModel(application) {
                 val taskId = event.getString("taskId")
                 val owner = event.getString("session")
                 if (sessions.none { it.id == owner }) sessions = listOf(ChatSession(id = owner, title = event.optString("botName", "PhoneBot"), helper = event.optString("helper", "shizuku"), screen = event.optString("screen", "main"),
-                    provider = event.optString("provider"), model = event.optString("model"), avatarColor = event.optLong("avatarColor", 0xFF3985FF))) + sessions
+                    provider = event.optString("provider"), model = event.optString("model"), avatarColor = event.optLong("avatarColor", 0L))) + sessions
                 sessions = sessions.map { session -> if (session.id == owner) session.copy(turns = if (session.turns.none { it.id == taskId }) session.turns + ChatTurn(taskId, event.getString("prompt"))
                     else session.turns.map { if (it.id == taskId) it.copy(status = "running") else it }) else session }
             }

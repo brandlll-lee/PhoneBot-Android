@@ -68,6 +68,14 @@ The lifecycle test deliberately kills the engine process. Accessibility runs in 
 
 ## Validation record
 
+Validated on 2026-11-02 for chat positioning and Bot visuals:
+
+- Runtime: 24 tests passed. JVM: 9 tests passed. APK builds and lint passed.
+- Samsung S21, Android 14, ARM64: 25 selected UI tests passed. Another 13 passed at 1.3 font scale. Checks covered latest-message positioning, contact switching, separate drafts, trace anchors on each expansion and collapse, 200-step lazy composition, Markdown streaming, Provider marks, avatar colors, header sizing, fixed settings panels, keyboard dismissal and task navigation. Light and dark screenshots were inspected. The APK was installed as an update. Existing credentials were preserved.
+- Real-touch `FrameMetrics` sampling used a 200-step trace and a 30-paragraph reply. Retaining rendered replies reduced median draw time from about 31 ms to 4.6 ms in the same non-debuggable diagnostic build. Total-frame P95 remained about 61 ms; the final debug build measured about 75 ms. This stress case still has slow frames. Disabling blur did not improve its timing. These figures do not establish sustained 60 fps.
+
+These checks used controlled data. A cloud-backed third-party app task was not rerun.
+
 Validated on 2026-11-02 for Bot contacts and parallel execution:
 
 - Runtime: 24 tests passed against source and bundle. Real Pi sessions kept tools, cancellation and persisted history separate. JVM: 9 tests passed. Both APK builds, lint and 16 KB ZIP alignment passed.

@@ -18,6 +18,31 @@ import org.junit.Test
 class ConversationSettingsTest {
     @get:Rule val compose = createAndroidComposeRule<MainActivity>()
 
+    @Test fun settingsKeepTheirPositionDuringBoundaryScrollsAndDrags() {
+        compose.onNodeWithTag("chat_identity").performClick()
+        val title = compose.onNodeWithText("Bot 设置")
+        val initial = title.getUnclippedBoundsInRoot().top
+        val sheet = compose.onNodeWithTag("settings_sheet")
+        repeat(6) { sheet.performTouchInput { swipeUp(durationMillis = 180) } }
+        repeat(6) { sheet.performTouchInput { swipeDown(durationMillis = 180) } }
+        title.performTouchInput { swipeDown(durationMillis = 180) }
+        compose.mainClock.autoAdvance = false
+        try {
+            repeat(30) {
+                compose.mainClock.advanceTimeByFrame()
+                assertEquals(initial.value, title.getUnclippedBoundsInRoot().top.value, .5f)
+            }
+        } finally { compose.mainClock.autoAdvance = true }
+        compose.onNodeWithContentDescription("关闭设置").performClick()
+        compose.onNodeWithContentDescription("更多选项").performClick()
+        compose.onNodeWithText("设置").performClick()
+        val settings = compose.onNodeWithText("设置")
+        val top = settings.getUnclippedBoundsInRoot().top
+        repeat(4) { sheet.performTouchInput { swipeUp(durationMillis = 180) } }
+        assertEquals(top.value, settings.getUnclippedBoundsInRoot().top.value, .5f)
+        compose.onNodeWithContentDescription("关闭设置").performClick()
+    }
+
     @Test fun floatingChatScrollsUnderControlsInBothThemes() {
         lateinit var model: PhoneBotModel
         compose.runOnIdle { model = ViewModelProvider(compose.activity)[PhoneBotModel::class.java] }
@@ -39,6 +64,14 @@ class ConversationSettingsTest {
             compose.runOnIdle { model = ViewModelProvider(compose.activity)[PhoneBotModel::class.java] }
             compose.waitUntil(10000) { model.sessions.any { it.id == id } }
             compose.runOnIdle { model.selectSession(id) }
+            compose.onAllNodesWithText("第 23 项结果", substring = true).onFirst().assertIsDisplayed()
+            compose.onNodeWithTag("chat_messages").performScrollToNode(hasText("第 12 项结果", substring = true))
+            compose.runOnIdle { model.selectSession(original) }
+            compose.runOnIdle { model.selectSession(id) }
+            compose.onAllNodesWithText("第 23 项结果", substring = true).onFirst().assertIsDisplayed()
+            compose.activityRule.scenario.recreate()
+            compose.runOnIdle { model = ViewModelProvider(compose.activity)[PhoneBotModel::class.java] }
+            compose.onAllNodesWithText("第 23 项结果", substring = true).onFirst().assertIsDisplayed()
             val automation = androidx.test.platform.app.InstrumentationRegistry.getInstrumentation()
                 .getUiAutomation(android.app.UiAutomation.FLAG_DONT_SUPPRESS_ACCESSIBILITY_SERVICES)
             fun frames(command: String): String = automation.executeShellCommand(command).use {

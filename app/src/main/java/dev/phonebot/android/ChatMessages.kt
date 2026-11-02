@@ -2,7 +2,6 @@ package dev.phonebot.android
 
 import android.graphics.BitmapFactory
 import androidx.compose.foundation.*
-import androidx.compose.foundation.gestures.scrollBy
 import androidx.compose.foundation.interaction.*
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.*
@@ -21,14 +20,18 @@ import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.layout.LocalPinnableContainer
+import androidx.compose.ui.layout.PinnableContainer
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import com.mikepenz.markdown.model.rememberMarkdownState
 
-private data class ChatRow(val turn: ChatTurn, val part: String, val step: TaskStep? = null) {
+private data class ChatRow(val turn: ChatTurn, val part: String, val step: TaskStep? = null, val detailCount: Int = 0) {
     val key get() = "${turn.id}/$part/${step?.id.orEmpty()}"
 }
 
@@ -36,7 +39,10 @@ private data class ChatRow(val turn: ChatTurn, val part: String, val step: TaskS
     list: LazyListState = rememberLazyListState(), focusedTask: String = "",
     contentPadding: PaddingValues = PaddingValues(horizontal = PhoneUi.space, vertical = PhoneUi.gap)) {
     var expanded by rememberSaveable { mutableStateOf(mapOf<String, Boolean>()) }
-    var positionedCount by rememberSaveable { mutableIntStateOf(-1) }
+    val replyContainers = remember { mutableMapOf<String, PinnableContainer>() }
+    val pinnedReplies = remember { mutableMapOf<String, PinnableContainer.PinnedHandle>() }
+    DisposableEffect(Unit) { onDispose { pinnedReplies.values.forEach { it.release() } } }
+    val replies = turns.associate { turn -> turn.id to key(turn.id) { rememberMarkdownState(turn.answer, retainState = true) } }
     val rows = remember(turns, activeTask, expanded) { buildList {
         turns.forEach { turn ->
             val running = turn.id == activeTask
@@ -44,7 +50,8 @@ private data class ChatRow(val turn: ChatTurn, val part: String, val step: TaskS
             val steps = turn.steps.filterNot { running && turn.streamText.isNotBlank() && it.kind == "text" && it.request == request }
             add(ChatRow(turn, "prompt"))
             if (steps.isNotEmpty() || turn.image.isNotEmpty() || (running && turn.streamText.isBlank())) {
-                add(ChatRow(turn, "trace"))
+                val detailCount = steps.size + (if (turn.image.isNotEmpty()) 1 else 0) + (if (running && turn.steps.isEmpty()) 1 else 0)
+                add(ChatRow(turn, "trace", detailCount = detailCount))
                 if (expanded["${turn.id}/$running"] ?: running) {
                     if (running && turn.steps.isEmpty()) add(ChatRow(turn, "waiting"))
                     steps.forEach { add(ChatRow(turn, "step", it)) }
@@ -53,22 +60,18 @@ private data class ChatRow(val turn: ChatTurn, val part: String, val step: TaskS
             }
             if (turn.answer.isNotBlank() || (running && turn.streamText.isNotBlank())) add(ChatRow(turn, "reply"))
         }
-    } }
-    LaunchedEffect(focusedTask, turns.size) {
-        if (focusedTask.isEmpty() && positionedCount == turns.size) return@LaunchedEffect
-        val index = if (focusedTask.isEmpty()) rows.lastIndex else rows.indexOfFirst { it.turn.id == focusedTask && it.part == "prompt" }
-        if (index >= 0) { list.scrollToItem(index); positionedCount = turns.size }
-    }
-    LaunchedEffect(turns.lastOrNull()) {
-        if (focusedTask.isNotEmpty() || list.isScrollInProgress || rows.isEmpty()) return@LaunchedEffect
-        withFrameNanos { }
-        val last = list.layoutInfo.visibleItemsInfo.lastOrNull() ?: return@LaunchedEffect
-        if (last.index >= rows.lastIndex - 1) {
-            if (last.index < rows.lastIndex) list.animateScrollToItem(rows.lastIndex)
-            else (last.offset + last.size - list.layoutInfo.viewportEndOffset).takeIf { it > 0 }?.let { list.scrollBy(it.toFloat()) }
+    }.asReversed() }
+    val following by remember(list) { derivedStateOf { list.firstVisibleItemIndex == 0 && list.firstVisibleItemScrollOffset == 0 } }
+    LaunchedEffect(focusedTask) {
+        if (focusedTask.isNotEmpty()) {
+            val index = rows.indexOfFirst { it.turn.id == focusedTask && it.part == "prompt" }
+            if (index >= 0) list.requestScrollToItem(index)
         }
     }
-    LazyColumn(state = list, modifier = modifier.testTag("chat_messages"), contentPadding = contentPadding) {
+    LaunchedEffect(turns.lastOrNull()) {
+        if (following && focusedTask.isEmpty() && !list.isScrollInProgress) list.requestScrollToItem(0)
+    }
+    LazyColumn(state = list, reverseLayout = true, modifier = modifier.testTag("chat_messages"), contentPadding = contentPadding) {
         items(rows, key = { it.key }, contentType = { it.part }) { row ->
             val turn = row.turn
             val running = turn.id == activeTask
@@ -85,7 +88,12 @@ private data class ChatRow(val turn: ChatTurn, val part: String, val step: TaskS
                     val open = expanded[key] ?: running
                     Box(if (open) Modifier.testTag("execution_trace") else Modifier) {
                         TraceButton(when { running -> "正在执行"; turn.status == "error" -> "执行失败"; turn.status == "stopped" -> "已停止"
-                            turn.status == "interrupted" -> "任务已中断"; else -> "执行过程" }, open, "execution_toggle") { expanded = expanded + (key to !open) }
+                            turn.status == "interrupted" -> "任务已中断"; else -> "执行过程" }, open, "execution_toggle") {
+                            val visible = list.layoutInfo.visibleItemsInfo.firstOrNull { it.key == row.key }
+                            if (!open) replyContainers[turn.id]?.let { container -> pinnedReplies.getOrPut(turn.id) { container.pin() } }
+                            expanded = expanded + (key to !open)
+                            visible?.let { list.requestScrollToItem(it.index + if (open) -row.detailCount else row.detailCount, -it.offset) }
+                        }
                     }
                 }
                 "waiting" -> Text("正在等待模型", color = colors.onSurfaceVariant, style = PhoneUi.traceBody, modifier = Modifier.padding(start = 30.dp, top = 8.dp, bottom = 8.dp))
@@ -97,8 +105,15 @@ private data class ChatRow(val turn: ChatTurn, val part: String, val step: TaskS
                     bitmap?.let { Image(it.asImageBitmap(), "任务截图", Modifier.fillMaxWidth(.6f).heightIn(max = PhoneUi.attachmentHeight).clip(PhoneUi.traceImageShape)) }
                 }
                 "reply" -> Box(Modifier.fillMaxWidth().padding(vertical = PhoneUi.space).clip(MaterialTheme.shapes.large)
-                    .background(colors.surfaceContainerLow).padding(PhoneUi.space).testTag("assistant_message")) {
-                    MarkdownAnswer.Content(turn.answer.ifEmpty { turn.streamText }, running && turn.answer.isEmpty())
+                    .background(colors.surfaceContainerLow).padding(PhoneUi.space).testTag("assistant_message").onGloballyPositioned {
+                        if (!(expanded["${turn.id}/$running"] ?: running)) pinnedReplies.remove(turn.id)?.release()
+                    }) {
+                    val container = LocalPinnableContainer.current
+                    DisposableEffect(turn.id, container) {
+                        if (container != null) replyContainers[turn.id] = container
+                        onDispose { replyContainers.remove(turn.id) }
+                    }
+                    MarkdownAnswer.Content(turn.answer.ifEmpty { turn.streamText }, running && turn.answer.isEmpty(), state = replies[turn.id])
                 }
             }
         }

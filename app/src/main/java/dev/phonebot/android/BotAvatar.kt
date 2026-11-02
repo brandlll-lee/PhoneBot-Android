@@ -9,16 +9,20 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.luminance
+import androidx.compose.ui.graphics.toArgb
+import androidx.core.graphics.ColorUtils
 import dev.chrisbanes.haze.*
 import dev.chrisbanes.haze.blur.*
 
 @Composable internal fun BotAvatar(color: Long, modifier: Modifier = Modifier, working: Boolean = false, interactionSource: InteractionSource? = null) {
-    val background = Color(color)
-    Box(modifier.background(background, CircleShape), contentAlignment = Alignment.Center) {
-        PhoneBotLogo(Modifier.fillMaxSize(.76f), working, interactionSource, if (background.luminance() > .179f) Color.Black else Color.White)
+    val ink = botInk(color, MaterialTheme.colorScheme.background == Color.Black)
+    Box(modifier.background(Color(botPaper(ink)), CircleShape), contentAlignment = Alignment.Center) {
+        PhoneBotLogo(Modifier.fillMaxSize(.76f), working, interactionSource, Color(ink))
     }
 }
+
+internal fun botInk(color: Long, dark: Boolean): Int = if (color == 0L) (if (dark) Color.White else Color.Black).toArgb() else color.toInt()
+internal fun botPaper(ink: Int): Int = if (ColorUtils.calculateLuminance(ink) > .179) android.graphics.Color.BLACK else android.graphics.Color.WHITE
 
 internal fun Modifier.edgeBlur(state: HazeState, top: Boolean): Modifier = hazeBlur(
     input = HazeInput.Sources(state),
@@ -32,7 +36,7 @@ internal fun Modifier.edgeBlur(state: HazeState, top: Boolean): Modifier = hazeB
 @Composable internal fun BotEditor(model: PhoneBotModel, enabled: Boolean) {
     val bot = model.session ?: return
     var name by remember(bot.id, bot.title) { mutableStateOf(bot.title) }
-    var hex by remember(bot.id, bot.avatarColor) { mutableStateOf("%06X".format(bot.avatarColor and 0xFFFFFF)) }
+    var hex by remember(bot.id, bot.avatarColor) { mutableStateOf(if (bot.avatarColor == 0L) "" else "%06X".format(bot.avatarColor and 0xFFFFFF)) }
     val hsv = remember(bot.avatarColor) { FloatArray(3).also { android.graphics.Color.colorToHSV(bot.avatarColor.toInt(), it) } }
     Column(verticalArrangement = Arrangement.spacedBy(PhoneUi.small)) {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(PhoneUi.space)) {
@@ -40,6 +44,7 @@ internal fun Modifier.edgeBlur(state: HazeState, top: Boolean): Modifier = hazeB
             OutlinedTextField(name, { name = it }, label = { Text("Bot 名字") }, enabled = enabled, singleLine = true, modifier = Modifier.weight(1f))
         }
         TextButton(onClick = { model.editBot(name) }, enabled = enabled && name.isNotBlank() && name.trim() != bot.title) { Text("保存名字") }
+        TextButton(onClick = { model.editBot(color = 0L) }, enabled = enabled) { Text("默认黑白") }
         Row(horizontalArrangement = Arrangement.spacedBy(PhoneUi.small)) {
             listOf(0xFF3985FF, 0xFF8B5CF6, 0xFFF59E0B, 0xFF10B981, 0xFFEC4899, 0xFF555555).forEach { color ->
                 IconButton(onClick = { model.editBot(color = color) }, enabled = enabled) { BotAvatar(color, Modifier.size(PhoneUi.send)) }

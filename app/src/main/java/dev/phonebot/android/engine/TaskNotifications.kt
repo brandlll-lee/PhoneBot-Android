@@ -8,14 +8,17 @@ import android.content.Context
 import android.content.Intent
 import android.graphics.Canvas
 import android.graphics.Paint
-import android.graphics.Color
-import androidx.core.graphics.ColorUtils
+import android.content.res.Configuration
 import androidx.appcompat.content.res.AppCompatResources
 import androidx.core.graphics.createBitmap
 import androidx.core.net.toUri
 import dev.phonebot.android.MainActivity
 import dev.phonebot.android.MarkdownAnswer
 import dev.phonebot.android.R
+import dev.phonebot.android.Appearance
+import dev.phonebot.android.PhoneAppearance
+import dev.phonebot.android.botInk
+import dev.phonebot.android.botPaper
 import java.io.File
 import org.json.JSONObject
 
@@ -47,18 +50,24 @@ internal object TaskNotifications {
         val pending = PendingIntent.getActivity(context, 0, open(context, start), PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
         val summary = MarkdownAnswer.plain(event.optString("text", event.optString("message"))).take(240)
         val notification = Notification.Builder(context, CHANNEL).setSmallIcon(R.drawable.ic_phonebot_mark)
-            .setLargeIcon(avatar(context, start.optLong("avatarColor", 0xFF3985FF).toInt()))
+            .setLargeIcon(avatar(context, start.optLong("avatarColor", 0L)))
             .setContentTitle("${start.optString("botName", "PhoneBot")} · $title")
             .setContentText(summary).setStyle(Notification.BigTextStyle().bigText(summary))
             .setVisibility(Notification.VISIBILITY_PRIVATE).setContentIntent(pending).setAutoCancel(true).setOnlyAlertOnce(true).build()
         return try { manager.notify(id, 2, notification); true } catch (_: SecurityException) { false }
     }
 
-    private fun avatar(context: Context, color: Int) = createBitmap(96, 96).also { bitmap ->
+    internal fun avatar(context: Context, color: Long) = createBitmap(96, 96).also { bitmap ->
+        val dark = when (PhoneAppearance.mode) {
+            Appearance.DARK -> true
+            Appearance.LIGHT -> false
+            Appearance.SYSTEM -> context.resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK == Configuration.UI_MODE_NIGHT_YES
+        }
+        val ink = botInk(color, dark)
         val canvas = Canvas(bitmap)
-        canvas.drawCircle(48f, 48f, 48f, Paint(Paint.ANTI_ALIAS_FLAG).apply { this.color = color })
+        canvas.drawCircle(48f, 48f, 48f, Paint(Paint.ANTI_ALIAS_FLAG).apply { this.color = botPaper(ink) })
         AppCompatResources.getDrawable(context, R.drawable.ic_phonebot_mark)?.mutate()?.apply {
-            setTint(if (ColorUtils.calculateLuminance(color) > .179) Color.BLACK else Color.WHITE)
+            setTint(ink)
             setBounds(12, 12, 84, 84)
             draw(canvas)
         }

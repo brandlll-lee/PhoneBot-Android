@@ -39,7 +39,8 @@ val prepareRuntime by tasks.registering(Exec::class) {
     commandLine("node", "scripts/prepare-runtime.mjs")
     inputs.files(rootProject.fileTree("runtime") {
         exclude("node_modules/**", "dist/**")
-    }, rootProject.file("scripts/prepare-runtime.mjs"), rootProject.file("scripts/prepare-brand.mjs"), rootProject.file("docs/assets/phonebot-black.svg"))
+    }, rootProject.file("scripts/prepare-runtime.mjs"), rootProject.file("scripts/prepare-brand.mjs"), rootProject.file("scripts/prepare-provider-icons.mjs"),
+        rootProject.fileTree("docs/assets/providers"), rootProject.file("docs/assets/phonebot-black.svg"))
     outputs.dirs("src/main/assets/runtime", "src/main/jniLibs", "src/main/cpp/include")
     outputs.files("src/main/res/drawable/ic_phonebot_mark.xml", "src/main/res/drawable/ic_phonebot_foreground.xml",
         "src/main/res/mipmap-anydpi/ic_launcher.xml", "src/main/res/mipmap-anydpi-v33/ic_launcher.xml",

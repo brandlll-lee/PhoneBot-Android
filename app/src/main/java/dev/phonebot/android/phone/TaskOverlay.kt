@@ -152,7 +152,7 @@ internal class TaskOverlay(private val service: PhoneAccessibilityService) : Sav
             .semantics { contentDescription = if (display?.virtual == true) "查看 Agent 屏幕" else "返回当前会话" }, contentAlignment = Alignment.Center) {
             Box(Modifier.size(PhoneUi.bubble).clip(CircleShape).background(colors.background)
                 .border(PhoneUi.hairline, colors.outlineVariant, CircleShape), contentAlignment = Alignment.Center) {
-                BotAvatar(start.optLong("avatarColor", 0xFF3985FF), Modifier.fillMaxSize(), working = true, interactionSource = interaction)
+                BotAvatar(start.optLong("avatarColor", 0L), Modifier.fillMaxSize(), working = true, interactionSource = interaction)
             }
             Box(Modifier.align(Alignment.BottomEnd).padding(PhoneUi.tiny).size(PhoneUi.activityDot)
                 .background(colors.tertiary, CircleShape).border(PhoneUi.frameLine, colors.background, CircleShape))
