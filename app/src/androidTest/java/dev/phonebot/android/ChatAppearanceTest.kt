@@ -41,7 +41,7 @@ class ChatAppearanceTest {
         val mode = mutableStateOf(Appearance.LIGHT)
         val color = mutableStateOf(0xFFAA2255L)
         compose.setContent { PhoneBotTheme(mode.value) {
-            BotAvatar(color.value, Modifier.size(100.dp).testTag("avatar"))
+            Surface(color = Color(0xFF23AABB)) { BotAvatar(color.value, Modifier.size(100.dp).testTag("avatar")) }
         } }
         val context = InstrumentationRegistry.getInstrumentation().targetContext
         val original = PhoneAppearance.mode
@@ -52,10 +52,11 @@ class ChatAppearanceTest {
                 val ink = botInk(selected, appearance == Appearance.DARK)
                 val pixels = compose.onNodeWithTag("avatar").captureToImage().toPixelMap()
                 assertTrue((0 until pixels.width).any { x -> (0 until pixels.height).any { y -> pixels[x, y] == Color(ink) } })
-                assertEquals(Color(botPaper(ink)), pixels[pixels.width / 2, pixels.height / 2])
+                assertEquals(Color(0xFF23AABB), pixels[pixels.width / 2, pixels.height / 2])
+                assertEquals(Color(0xFF23AABB), pixels[1, 1])
                 val notification = TaskNotifications.avatar(context, selected)
                 assertEquals(ink, notification.getPixel(41, 47))
-                assertEquals(botPaper(ink), notification.getPixel(48, 48))
+                assertEquals(0, notification.getPixel(48, 48))
             }
         } } finally { compose.runOnIdle { PhoneAppearance.mode = original } }
     }

@@ -68,6 +68,13 @@ The lifecycle test deliberately kills the engine process. Accessibility runs in 
 
 ## Validation record
 
+Validated on 2026-11-02 for trace expansion and transparent avatars:
+
+- S21: 26 selected UI tests passed. The new regression observes layout changes while expanding short chats with intermediate Markdown. Both the earlier short-list fixture and the Markdown fixture failed before their fixes. On the actual chat page, four native taps kept the trace title and all tracked visible messages above it at the same pixel coordinates.
+- Avatar tests checked theme-dependent ink, a visible parent background through the Logo, and transparent pixels in notification bitmaps. JVM tests, APK builds and lint passed. The updated APK was installed with existing data preserved.
+
+These checks do not change the long-trace frame-time limits below. A cloud-backed agent task was not rerun.
+
 Validated on 2026-11-02 for chat positioning and Bot visuals:
 
 - Runtime: 24 tests passed. JVM: 9 tests passed. APK builds and lint passed.

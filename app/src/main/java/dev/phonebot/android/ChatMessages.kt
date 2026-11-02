@@ -30,6 +30,7 @@ import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import com.mikepenz.markdown.model.rememberMarkdownState
+import com.mikepenz.markdown.model.MarkdownState
 
 private data class ChatRow(val turn: ChatTurn, val part: String, val step: TaskStep? = null, val detailCount: Int = 0) {
     val key get() = "${turn.id}/$part/${step?.id.orEmpty()}"
@@ -43,6 +44,9 @@ private data class ChatRow(val turn: ChatTurn, val part: String, val step: TaskS
     val pinnedReplies = remember { mutableMapOf<String, PinnableContainer.PinnedHandle>() }
     DisposableEffect(Unit) { onDispose { pinnedReplies.values.forEach { it.release() } } }
     val replies = turns.associate { turn -> turn.id to key(turn.id) { rememberMarkdownState(turn.answer, retainState = true) } }
+    val texts = turns.associate { turn -> turn.id to turn.steps.filter { it.kind == "text" }.associate { step ->
+        step.id to key(turn.id, step.id) { rememberMarkdownState(step.detail, retainState = true) }
+    } }
     val rows = remember(turns, activeTask, expanded) { buildList {
         turns.forEach { turn ->
             val running = turn.id == activeTask
@@ -71,7 +75,8 @@ private data class ChatRow(val turn: ChatTurn, val part: String, val step: TaskS
     LaunchedEffect(turns.lastOrNull()) {
         if (following && focusedTask.isEmpty() && !list.isScrollInProgress) list.requestScrollToItem(0)
     }
-    LazyColumn(state = list, reverseLayout = true, modifier = modifier.testTag("chat_messages"), contentPadding = contentPadding) {
+    LazyColumn(state = list, reverseLayout = true, verticalArrangement = Arrangement.Top,
+        modifier = modifier.testTag("chat_messages"), contentPadding = contentPadding) {
         items(rows, key = { it.key }, contentType = { it.part }) { row ->
             val turn = row.turn
             val running = turn.id == activeTask
@@ -97,7 +102,10 @@ private data class ChatRow(val turn: ChatTurn, val part: String, val step: TaskS
                     }
                 }
                 "waiting" -> Text("正在等待模型", color = colors.onSurfaceVariant, style = PhoneUi.traceBody, modifier = Modifier.padding(start = 30.dp, top = 8.dp, bottom = 8.dp))
-                "step" -> TraceEntry(checkNotNull(row.step), running)
+                "step" -> {
+                    val step = checkNotNull(row.step)
+                    TraceEntry(step, running, texts[turn.id]?.get(step.id))
+                }
                 "image" -> {
                     val bitmap by produceState<android.graphics.Bitmap?>(null, turn.image) {
                         value = withContext(Dispatchers.IO) { BitmapFactory.decodeFile(turn.image, BitmapFactory.Options().apply { inSampleSize = 3 }) }
@@ -135,7 +143,7 @@ private data class ChatRow(val turn: ChatTurn, val part: String, val step: TaskS
     }
 }
 
-@Composable private fun TraceEntry(step: TaskStep, running: Boolean) {
+@Composable private fun TraceEntry(step: TaskStep, running: Boolean, text: MarkdownState?) {
     val colors = MaterialTheme.colorScheme
     Row(Modifier.fillMaxWidth().drawBehind {
         drawLine(colors.outlineVariant, Offset(8.dp.toPx(), 0f), Offset(8.dp.toPx(), size.height), 1.dp.toPx())
@@ -166,7 +174,7 @@ private data class ChatRow(val turn: ChatTurn, val part: String, val step: TaskS
                     Text("思考", color = colors.onSurfaceVariant, style = PhoneUi.traceCode)
                     SelectionContainer { Text(step.detail, color = colors.onSurfaceVariant, style = PhoneUi.traceBody) }
                 }
-                "text" -> MarkdownAnswer.Content(step.detail, running && !step.done, colors.onSurfaceVariant)
+                "text" -> MarkdownAnswer.Content(step.detail, running && !step.done, colors.onSurfaceVariant, text)
                 else -> SelectionContainer { Text(step.detail, color = if (step.error) colors.error else colors.onSurfaceVariant, style = PhoneUi.traceBody) }
             }
         }

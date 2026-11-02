@@ -8,6 +8,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.toPixelMap
+import kotlinx.coroutines.flow.collect
 import androidx.compose.ui.test.*
 import androidx.compose.ui.test.junit4.createComposeRule
 import org.junit.Assert.*
@@ -16,6 +17,40 @@ import org.junit.Test
 
 class TraceTest {
     @get:Rule val compose = createComposeRule()
+
+    @Test fun expansionKeepsItsAnchorThroughoutLayout() {
+        val fixture = mutableIntStateOf(0)
+        val positions = mutableListOf<Int>()
+        var list = androidx.compose.foundation.lazy.LazyListState()
+        compose.setContent { PhoneBotTheme { Surface(Modifier.fillMaxSize()) {
+            key(fixture.intValue) {
+                list = remember { androidx.compose.foundation.lazy.LazyListState() }
+                val turn = ChatTurn("layout", "保持这条消息的位置", status = "done", answer = "任务已结束。".repeat(1 + fixture.intValue * 8),
+                    steps = (1..60).map { TaskStep("layout-$it", "读取页面 $it", done = true,
+                        kind = if (it == 1) "text" else "tool", detail = "**当前页面**：正在检查内容与可用操作。\n\n".repeat(12)) })
+                LaunchedEffect(list) {
+                    snapshotFlow { list.layoutInfo.visibleItemsInfo.firstOrNull { it.key == "layout/trace/" }?.offset }
+                        .collect { if (it != null) positions.add(it) }
+                }
+                ChatMessages(listOf(turn), "", Modifier.fillMaxSize(), list,
+                    contentPadding = PaddingValues(top = 72.dp, bottom = 112.dp, start = 16.dp, end = 16.dp))
+            }
+        } } }
+        repeat(3) { trial ->
+            compose.runOnIdle { fixture.intValue = trial }
+            val toggle = compose.onNodeWithTag("execution_toggle")
+            toggle.assertIsDisplayed()
+            val top = toggle.getUnclippedBoundsInRoot().top
+            compose.runOnIdle { positions.clear() }
+            val offset = list.layoutInfo.visibleItemsInfo.first { it.key == "layout/trace/" }.offset
+            toggle.performTouchInput { click(center) }
+            repeat(20) {
+                compose.mainClock.advanceTimeByFrame()
+                assertEquals("trial=$trial frame=$it offset=$offset changes=$positions first=${list.firstVisibleItemIndex}/${list.firstVisibleItemScrollOffset}", top.value, toggle.getUnclippedBoundsInRoot().top.value, 1f)
+            }
+            compose.runOnIdle { assertTrue("trial=$trial offsets=$positions", positions.all { kotlin.math.abs(it - offset) <= 1 }) }
+        }
+    }
 
     @Test fun latestReplyStartsAtItsEndAndHistoryStaysInPlace() {
         val turns = mutableStateOf((1..20).map { index -> ChatTurn("latest-$index", "任务 $index", status = "done",

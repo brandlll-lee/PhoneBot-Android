@@ -1,28 +1,24 @@
 package dev.phonebot.android
 
-import androidx.compose.foundation.background
 import androidx.compose.foundation.interaction.InteractionSource
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.toArgb
-import androidx.core.graphics.ColorUtils
 import dev.chrisbanes.haze.*
 import dev.chrisbanes.haze.blur.*
 
 @Composable internal fun BotAvatar(color: Long, modifier: Modifier = Modifier, working: Boolean = false, interactionSource: InteractionSource? = null) {
     val ink = botInk(color, MaterialTheme.colorScheme.background == Color.Black)
-    Box(modifier.background(Color(botPaper(ink)), CircleShape), contentAlignment = Alignment.Center) {
+    Box(modifier, contentAlignment = Alignment.Center) {
         PhoneBotLogo(Modifier.fillMaxSize(.76f), working, interactionSource, Color(ink))
     }
 }
 
 internal fun botInk(color: Long, dark: Boolean): Int = if (color == 0L) (if (dark) Color.White else Color.Black).toArgb() else color.toInt()
-internal fun botPaper(ink: Int): Int = if (ColorUtils.calculateLuminance(ink) > .179) android.graphics.Color.BLACK else android.graphics.Color.WHITE
 
 internal fun Modifier.edgeBlur(state: HazeState, top: Boolean): Modifier = hazeBlur(
     input = HazeInput.Sources(state),

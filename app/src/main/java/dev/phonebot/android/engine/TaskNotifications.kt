@@ -7,7 +7,6 @@ import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
 import android.graphics.Canvas
-import android.graphics.Paint
 import android.content.res.Configuration
 import androidx.appcompat.content.res.AppCompatResources
 import androidx.core.graphics.createBitmap
@@ -18,7 +17,6 @@ import dev.phonebot.android.R
 import dev.phonebot.android.Appearance
 import dev.phonebot.android.PhoneAppearance
 import dev.phonebot.android.botInk
-import dev.phonebot.android.botPaper
 import java.io.File
 import org.json.JSONObject
 
@@ -65,7 +63,6 @@ internal object TaskNotifications {
         }
         val ink = botInk(color, dark)
         val canvas = Canvas(bitmap)
-        canvas.drawCircle(48f, 48f, 48f, Paint(Paint.ANTI_ALIAS_FLAG).apply { this.color = botPaper(ink) })
         AppCompatResources.getDrawable(context, R.drawable.ic_phonebot_mark)?.mutate()?.apply {
             setTint(ink)
             setBounds(12, 12, 84, 84)

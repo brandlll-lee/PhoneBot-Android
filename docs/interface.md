@@ -10,6 +10,8 @@ The header uses two outlined circular controls and a central Bot avatar/name pil
 
 Messages fill the chat page. The header and composer overlay them. Measured control heights set the list's top and bottom content padding. Opening or switching a Bot starts at the latest message's end. A native reverse lazy list keeps the bottom position during streaming. Reading history does not follow new output. Each Bot retains its draft. Haze 2.0.1 captures only the message layer. Its native progressive blur softens the top and bottom edges. Controls stay sharp and use shared translucent surfaces, borders and shadows. See [Haze usage](https://chrisbanes.github.io/haze/2.0.1/blur/usage/) and [performance](https://chrisbanes.github.io/haze/2.0.1/performance/).
 
+Short chats align to the top. Expanding a trace keeps the title and earlier visible messages in place. Completed intermediate Markdown keeps its SDK parsing state while the trace is collapsed.
+
 ## Logo
 
 The logo uses a rounded phone frame, a speaker, two rounded eyes and a gesture bar. `docs/assets/phonebot-black.svg` owns the geometry. Run `node scripts/prepare-brand.mjs` to generate the white SVG, animated SVG, native drawing geometry, notification mark and adaptive launcher layers. `scripts/prepare-runtime.mjs` also runs this step. Both READMEs use the static SVGs through a light/dark picture element.
@@ -44,7 +46,7 @@ An arrow indicates navigation. It does not control whether a row can be pressed.
 
 Only add a secondary label when it adds useful context. Permission purposes and Android connection status provide required information. Establish other hierarchy with font size, weight, spacing, and alignment.
 
-Bot settings contain the user-defined name, avatar color, provider/model, helper and screen. Apply the selected color to the phone Logo. Use a contrasting neutral background. The default black/white Logo follows the theme. Offer presets, HSV sliders and HEX entry. Each Bot keeps its own model choice; credentials stay shared. New Bots inherit saved screen/helper defaults. Existing records retain their IDs, history and choices. Old records use the main screen and Shizuku. Lock only the running Bot's configuration. Basic main-screen tools do not require a helper.
+Bot settings contain the user-defined name, avatar color, provider/model, helper and screen. Apply the selected color to the phone Logo and keep its background transparent, including notification avatars. The default black/white Logo follows the theme. Offer presets, HSV sliders and HEX entry. Each Bot keeps its own model choice; credentials stay shared. New Bots inherit saved screen/helper defaults. Existing records retain their IDs, history and choices. Old records use the main screen and Shizuku. Lock only the running Bot's configuration. Basic main-screen tools do not require a helper.
 
 The device helper page shows the actual connection state. It offers built-in ADB pairing, reconnect, forget and opt-in reboot recovery. The pairing form accepts the port from Android's pairing-code dialog and a six-digit code. Pairing and connection ports are different. PhoneBot discovers the connection port. Keep the pairing code in transient UI memory. Clear it on submission and after successful pairing. The built-in helper requires Android 12 or later.
 
