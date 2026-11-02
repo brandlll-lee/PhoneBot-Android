@@ -191,12 +191,41 @@ class PhoneToolsTest {
             }
             val selected = call("tap", JSONObject().put("resourceId", "android:id/tabs")
                 .put("expect", JSONObject().put("resourceId", "android:id/tabs").put("selected", true)))
-            assertTrue(selected.getBoolean("treeStable"))
+            assertEquals("condition_met", selected.getString("stopReason"))
             assertTrue(selected.getBoolean("conditionMet"))
             assertFalse(selected.getBoolean("conditionBefore"))
             assertTrue(selected.getBoolean("changed"))
             assertTrue(selected.getLong("waitMs") >= 900)
             assertTrue(call("screen_read").getJSONArray("elements").objects().single { it.optString("resourceId") == "android:id/tabs" }.getBoolean("selected"))
+            lateinit var ticker: Runnable
+            lateinit var changing: android.widget.TextView
+            instrumentation.runOnMainSync {
+                val tab = observationActivity.findViewById<android.view.View>(android.R.id.tabs)
+                tab.isSelected = false
+                tab.setOnClickListener { tab.postDelayed({ tab.isSelected = true }, 400) }
+                changing = (tab.parent as android.view.ViewGroup)
+                    .let { (it.getChildAt(0) as android.widget.GridLayout).getChildAt(0) as android.widget.TextView }
+                var tick = 0
+                ticker = object : Runnable {
+                    override fun run() { changing.text = "更新 ${tick++}"; changing.postDelayed(this, 80) }
+                }
+                changing.post(ticker)
+            }
+            val resetDeadline = SystemClock.uptimeMillis() + 3000
+            while (call("screen_read").getJSONArray("elements").objects().single { it.optString("resourceId") == "android:id/tabs" }.getBoolean("selected")) {
+                check(SystemClock.uptimeMillis() < resetDeadline) { "Target selection did not reset" }
+                SystemClock.sleep(80)
+            }
+            try {
+                val dynamic = call("tap", JSONObject().put("resourceId", "android:id/tabs").put("timeoutMs", 1800)
+                    .put("expect", JSONObject().put("resourceId", "android:id/tabs").put("selected", true)))
+                assertTrue(dynamic.toString(), dynamic.getBoolean("conditionMet"))
+                assertFalse(dynamic.toString(), dynamic.getBoolean("conditionBefore"))
+                assertFalse(dynamic.toString(), dynamic.getBoolean("treeStable"))
+                assertEquals(dynamic.toString(), "condition_met", dynamic.getString("stopReason"))
+                assertTrue(dynamic.toString(), dynamic.getLong("waitMs") < 1500)
+                instrumentation.sendStatus(2, Bundle().apply { putString("conditionWait", "waitMs=${dynamic.getLong("waitMs")}, treeStable=${dynamic.getBoolean("treeStable")}, conditionMet=${dynamic.getBoolean("conditionMet")}") })
+            } finally { instrumentation.runOnMainSync { changing.removeCallbacks(ticker) } }
             instrumentation.runOnMainSync { observationActivity.finish(); activity.finish() }
         } finally {
             shell(if (originalServices.isEmpty()) "settings delete secure enabled_accessibility_services" else "settings put secure enabled_accessibility_services $originalServices")

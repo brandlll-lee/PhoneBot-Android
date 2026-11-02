@@ -10,6 +10,7 @@ import androidx.core.content.edit
 import androidx.compose.runtime.setValue
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.mikepenz.markdown.model.State
 import dev.phonebot.android.engine.EngineClient
 import dev.phonebot.android.engine.EnginePhase
 import dev.phonebot.android.engine.TaskJournal
@@ -102,6 +103,8 @@ class PhoneBotModel(application: Application) : AndroidViewModel(application) {
     private var catalogRequest = ""
     private var saveJob: Job? = null
     private val historyMutex = Mutex()
+    internal val markdown = mutableStateMapOf<String, Pair<String, State>>()
+    internal val submissions = mutableStateMapOf<String, String>()
     val session get() = sessions.find { it.id == selectedSession }
     val deviceId: String = preferences.getString("device", null) ?: UUID.randomUUID().toString().also { preferences.edit { putString("device", it) } }
 
@@ -200,6 +203,8 @@ class PhoneBotModel(application: Application) : AndroidViewModel(application) {
     fun deleteSession(id: String) {
         if (sessions.find { it.id == id }?.turns?.any { it.status == "running" } == true) return
         sessions = sessions.filter { it.id != id }
+        markdown.keys.removeAll { it.startsWith("$id/") }
+        submissions.remove(id)
         if (selectedSession == id) selectedSession = sessions.firstOrNull()?.id.orEmpty()
         if (sessions.isEmpty()) newSession() else save()
         selectPhone()
@@ -258,6 +263,7 @@ class PhoneBotModel(application: Application) : AndroidViewModel(application) {
         val taskId = UUID.randomUUID().toString()
         sessions = sessions.map { if (it.id == selectedSession) it.copy(
             updated = System.currentTimeMillis(), turns = it.turns + ChatTurn(taskId, prompt)) else it }.sortedByDescending { it.updated }
+        submissions[selectedSession] = taskId
         save()
         engine.command(JSONObject().put("type", "task").put("taskId", taskId).put("session", selectedSession).put("prompt", prompt).put("provider", provider).put("model", model)
             .put("helper", session?.helper ?: defaultHelper).put("screen", session?.screen ?: defaultScreen).put("botName", session?.title).put("avatarColor", session?.avatarColor))
@@ -329,11 +335,12 @@ class PhoneBotModel(application: Application) : AndroidViewModel(application) {
         saveJob?.cancel()
         saveJob = viewModelScope.launch {
             delay(200)
-            val value = JSONArray(sessions.map { session -> JSONObject().put("id", session.id).put("title", session.title).put("updated", session.updated).put("helper", session.helper).put("screen", session.screen)
+            val snapshot = sessions
+            val value = withContext(Dispatchers.Default) { JSONArray(snapshot.map { session -> JSONObject().put("id", session.id).put("title", session.title).put("updated", session.updated).put("helper", session.helper).put("screen", session.screen)
                 .put("provider", session.provider).put("model", session.model).put("avatarColor", session.avatarColor)
                 .put("turns", JSONArray(session.turns.map { turn -> JSONObject().put("id", turn.id).put("prompt", turn.prompt).put("answer", turn.answer).put("status", turn.status).put("image", turn.image)
                     .put("steps", JSONArray(turn.steps.map { step -> JSONObject().put("id", step.id).put("name", step.name).put("args", step.args).put("detail", step.detail).put("done", step.done).put("error", step.error)
-                        .put("kind", step.kind).put("request", step.request) })) })) }).toString()
+                        .put("kind", step.kind).put("request", step.request) })) })) }).toString() }
             try {
                 withContext(Dispatchers.IO) {
                     historyMutex.withLock {

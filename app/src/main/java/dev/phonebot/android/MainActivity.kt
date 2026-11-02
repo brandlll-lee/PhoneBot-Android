@@ -39,7 +39,7 @@ import androidx.compose.runtime.saveable.mapSaver
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.layout.SubcomposeLayout
 import androidx.compose.ui.unit.dp
 import dev.chrisbanes.haze.*
 import dev.chrisbanes.haze.blur.*
@@ -174,27 +174,9 @@ class MainActivity : ComponentActivity() {
         }
     }) {
         Scaffold(containerColor = MaterialTheme.colorScheme.background, snackbarHost = { SnackbarHost(snackbar) }, contentWindowInsets = WindowInsets.safeDrawing) { padding ->
-            val density = LocalDensity.current
-            val haze = rememberHazeState()
-            var topHeight by remember { mutableIntStateOf(0) }
-            var bottomHeight by remember { mutableIntStateOf(0) }
-            Box(Modifier.fillMaxSize().padding(padding).consumeWindowInsets(padding).imePadding()) {
-                key(model.selectedSession) {
-                    val list = remember { androidx.compose.foundation.lazy.LazyListState() }
-                    val turns = model.session?.turns.orEmpty()
-                    if (turns.isEmpty()) Box(Modifier.fillMaxSize().hazeSource(haze), contentAlignment = Alignment.Center) {
-                        Text(model.session?.title ?: "PhoneBot", style = MaterialTheme.typography.headlineLarge)
-                    } else ChatMessages(turns, model.activeTask, Modifier.fillMaxSize().hazeSource(haze), list, model.focusedTask,
-                        PaddingValues(start = PhoneUi.space, end = PhoneUi.space,
-                            top = with(density) { topHeight.toDp() } + PhoneUi.space,
-                            bottom = with(density) { bottomHeight.toDp() } + PhoneUi.space))
-                }
-                Box(Modifier.align(Alignment.TopCenter).fillMaxWidth().height(with(density) { topHeight.toDp() } + PhoneUi.gap).edgeBlur(haze, true))
-                Box(Modifier.align(Alignment.BottomCenter).fillMaxWidth().height(with(density) { bottomHeight.toDp() } + PhoneUi.gap).edgeBlur(haze, false))
-                Box(Modifier.align(Alignment.TopCenter).onSizeChanged { topHeight = it.height }) {
+            ChatLayout(Modifier.fillMaxSize().padding(padding).consumeWindowInsets(padding).imePadding(), header = {
                     ChatHeader(model.activeTask.isEmpty(), { scope.launch { drawer.open() } }, { panel = "session" }, model::newSession, { panel = "settings" }, model.session)
-                }
-                Column(Modifier.align(Alignment.BottomCenter).onSizeChanged { bottomHeight = it.height }) {
+                }, composer = { Column {
                 if (model.permission.isNotEmpty()) {
                     val required = model.permissions.find { it.id == model.permission }
                     Column(Modifier.fillMaxWidth().padding(horizontal = PhoneUi.space).clip(MaterialTheme.shapes.medium).background(MaterialTheme.colorScheme.surfaceContainer).padding(PhoneUi.space)) {
@@ -218,6 +200,15 @@ class MainActivity : ComponentActivity() {
                 }
                 TaskComposer(drafts[model.selectedSession].orEmpty(), { drafts[model.selectedSession] = it },
                     model.activeTask.isNotEmpty(), engine.canRun, model::submit, model::cancel)
+                } }) { messagePadding ->
+                key(model.selectedSession) {
+                    val botId = model.selectedSession
+                    val list = remember { androidx.compose.foundation.lazy.LazyListState() }
+                    val turns = model.session?.turns.orEmpty()
+                    if (turns.isEmpty()) Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                        Text(model.session?.title ?: "PhoneBot", style = MaterialTheme.typography.headlineLarge)
+                    } else ChatMessages(turns, model.activeTask, Modifier.fillMaxSize(), list, model.focusedTask, messagePadding,
+                        model.markdown, botId, model.submissions[botId].orEmpty(), { model.submissions.remove(botId) })
                 }
             }
         }
@@ -336,6 +327,31 @@ class MainActivity : ComponentActivity() {
             } },
             confirmButton = { if (prompt.optString("type") != "select") TextButton(onClick = { model.answerAuth(answer); answer = "" }, enabled = answer.isNotBlank() || prompt.optString("type") == "text") { Text("继续") } },
             dismissButton = { TextButton(onClick = model::cancelAuth) { Text("取消") } })
+    }
+}
+
+@Composable internal fun ChatLayout(modifier: Modifier = Modifier, header: @Composable () -> Unit,
+    composer: @Composable () -> Unit, content: @Composable (PaddingValues) -> Unit) {
+    val haze = rememberHazeState()
+    SubcomposeLayout(modifier) { constraints ->
+        val controls = constraints.copy(minHeight = 0)
+        val top = subcompose("header") { Box { header() } }.single().measure(controls)
+        val bottom = subcompose("composer") { Box { composer() } }.single().measure(controls)
+        val padding = PaddingValues(start = PhoneUi.space, end = PhoneUi.space,
+            top = top.height.toDp() + PhoneUi.space, bottom = bottom.height.toDp() + PhoneUi.space)
+        val messages = subcompose("messages") { Box(Modifier.fillMaxSize().hazeSource(haze)) { content(padding) } }.single().measure(constraints)
+        val edges = subcompose("edges") {
+            Box(Modifier.fillMaxSize()) {
+                Box(Modifier.align(Alignment.TopCenter).fillMaxWidth().height(top.height.toDp() + PhoneUi.gap).edgeBlur(haze, true))
+                Box(Modifier.align(Alignment.BottomCenter).fillMaxWidth().height(bottom.height.toDp() + PhoneUi.gap).edgeBlur(haze, false))
+            }
+        }.single().measure(constraints)
+        layout(constraints.maxWidth, constraints.maxHeight) {
+            messages.placeRelative(0, 0)
+            edges.placeRelative(0, 0)
+            top.placeRelative(0, 0)
+            bottom.placeRelative(0, constraints.maxHeight - bottom.height)
+        }
     }
 }
 

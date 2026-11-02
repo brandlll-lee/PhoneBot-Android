@@ -10,7 +10,11 @@ The header uses two outlined circular controls and a central Bot avatar/name pil
 
 Messages fill the chat page. The header and composer overlay them. Measured control heights set the list's top and bottom content padding. Opening or switching a Bot starts at the latest message's end. A native reverse lazy list keeps the bottom position during streaming. Reading history does not follow new output. Each Bot retains its draft. Haze 2.0.1 captures only the message layer. Its native progressive blur softens the top and bottom edges. Controls stay sharp and use shared translucent surfaces, borders and shadows. See [Haze usage](https://chrisbanes.github.io/haze/2.0.1/blur/usage/) and [performance](https://chrisbanes.github.io/haze/2.0.1/performance/).
 
-Short chats align to the top. Expanding a trace keeps the title and earlier visible messages in place. Completed intermediate Markdown keeps its SDK parsing state while the trace is collapsed.
+Short chats align to the top. Expanding a trace keeps the title and earlier visible messages in place. Apply the anchor after the updated list content is composed, before measurement. Completed intermediate Markdown keeps its SDK parsing state while the trace is collapsed.
+
+Measure floating controls and list padding in one `SubcomposeLayout` pass. Keep completed Markdown SDK results in the existing view model. Prepare the latest reply off the UI thread before its first display. Parse other replies and intermediate text on demand. Retain one content version per message and release the Bot's entries on deletion.
+
+Accepted submissions carry their task ID to the chat. Use one native scroll animation to reveal that request. Streaming follows after that animation. User scrolling or trace expansion stops following. Bot entry uses the reverse list's initial position.
 
 ## Logo
 

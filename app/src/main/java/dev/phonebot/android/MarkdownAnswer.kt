@@ -16,7 +16,7 @@ import com.mikepenz.markdown.m3.Markdown
 import com.mikepenz.markdown.m3.markdownColor
 import com.mikepenz.markdown.m3.markdownTypography
 import com.mikepenz.markdown.model.rememberMarkdownState
-import com.mikepenz.markdown.model.MarkdownState
+import com.mikepenz.markdown.model.State
 import com.mikepenz.markdown.model.rememberStreamingMarkdownState
 import dev.snipme.highlights.Highlights
 import dev.snipme.highlights.model.SyntaxThemes
@@ -40,7 +40,7 @@ internal object MarkdownAnswer {
         return text.toString().trim()
     }
 
-    @Composable fun Content(text: String, streaming: Boolean = false, color: Color = MaterialTheme.colorScheme.onSurface, state: MarkdownState? = null) {
+    @Composable fun Content(text: String, streaming: Boolean = false, color: Color = MaterialTheme.colorScheme.onSurface, state: State? = null) {
         val stream = rememberStreamingMarkdownState()
         LaunchedEffect(text, streaming) {
             if (streaming && text.startsWith(stream.content.toString())) withContext(Dispatchers.Default) {
@@ -61,8 +61,9 @@ internal object MarkdownAnswer {
             codeBlock = { MarkdownHighlightedCodeBlock(it.content, it.node, highlightsBuilder = highlighter, showHeader = true) })
         SelectionContainer {
             if (streaming) Markdown(stream, colors = colors, typography = typography, components = components, modifier = Modifier.fillMaxWidth())
+            else if (state != null) Markdown(state, colors = colors, typography = typography, components = components, modifier = Modifier.fillMaxWidth())
             else {
-                val parsed = state ?: rememberMarkdownState(text, retainState = true)
+                val parsed = rememberMarkdownState(text, retainState = true)
                 Markdown(parsed, colors = colors, typography = typography, components = components, modifier = Modifier.fillMaxWidth(),
                     loading = { Markdown(stream, colors = colors, typography = typography, components = components, modifier = Modifier.fillMaxWidth()) })
             }

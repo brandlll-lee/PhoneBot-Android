@@ -25,6 +25,7 @@ internal class PhoneActions(private val service: PhoneAccessibilityService, priv
         val began = SystemClock.uptimeMillis()
         var previous = ""
         var repeats = 0
+        var matches = 0
         while (true) {
             coroutineContext.ensureActive()
             check(service.available(target)) { "执行屏幕不可用，请检查连接和锁屏状态" }
@@ -33,6 +34,7 @@ internal class PhoneActions(private val service: PhoneAccessibilityService, priv
             repeats = if (fingerprint.isNotEmpty() && fingerprint == previous) repeats + 1 else 0
             val stable = repeats >= 2 && SystemClock.uptimeMillis() - service.lastScreenEvent(target.displayId) >= 250
             val met = fingerprint.isNotEmpty() && expected?.let(screen::condition) == true
+            matches = if (met) matches + 1 else 0
             val changed = fingerprint.isNotEmpty() && fingerprint != before
             val expired = SystemClock.uptimeMillis() - began >= timeout
             val popup = dialog() && screen.root?.windowId != dialogWindow
@@ -41,7 +43,7 @@ internal class PhoneActions(private val service: PhoneAccessibilityService, priv
             val reason = when {
                 popup -> "dialog"
                 switched -> "navigation"
-                met && stable -> if (conditionBefore && !changed) "condition_unchanged" else "condition_met"
+                met && (stable || !conditionBefore && matches >= 2) -> if (conditionBefore && !changed) "condition_unchanged" else "condition_met"
                 expected == null && stable -> "tree_stable"
                 expired -> if (fingerprint.isEmpty()) "tree_unreadable" else "timeout"
                 else -> null

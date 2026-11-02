@@ -115,6 +115,11 @@ for (const entry of ["src/main.mjs", "dist/engine.mjs"]) {
     assert.ok(!JSON.stringify(live[0]).includes("旧请求0"));
     assert.equal(live[0].tools.length, 21);
     assert.ok(live[0].messages.some((m) => m.role === "system"));
+    const instruction = live[0].messages.find((m) => m.role === "system").content;
+    const text = typeof instruction === "string" ? instruction : JSON.stringify(instruction);
+    for (const rule of ["hard requirements and exclusions", "still-applicable requirements", "qualifying terms attached to that item",
+      "a local empty result does not establish absence elsewhere", '"all", "only" or "lowest"']) assert.ok(text.includes(rule), rule);
+    assert.deepEqual(live[0].messages.findLast((m) => m.role === "user").content, [{ type: "text", text: "读取当前页面" }]);
     assert.ok(JSON.stringify(live[1]).includes("当前页面"));
     host.send({ type: "stop" });
     await host.exited;

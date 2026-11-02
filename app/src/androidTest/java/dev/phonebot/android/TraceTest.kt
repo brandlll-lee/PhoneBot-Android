@@ -10,7 +10,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.toPixelMap
 import kotlinx.coroutines.flow.collect
 import androidx.compose.ui.test.*
-import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.junit4.v2.createComposeRule
 import org.junit.Assert.*
 import org.junit.Rule
 import org.junit.Test
@@ -20,7 +20,8 @@ class TraceTest {
 
     @Test fun expansionKeepsItsAnchorThroughoutLayout() {
         val fixture = mutableIntStateOf(0)
-        val positions = mutableListOf<Int>()
+        val positions = mutableListOf<Int?>()
+        val markdown = mutableStateMapOf<String, Pair<String, com.mikepenz.markdown.model.State>>()
         var list = androidx.compose.foundation.lazy.LazyListState()
         compose.setContent { PhoneBotTheme { Surface(Modifier.fillMaxSize()) {
             key(fixture.intValue) {
@@ -30,25 +31,28 @@ class TraceTest {
                         kind = if (it == 1) "text" else "tool", detail = "**当前页面**：正在检查内容与可用操作。\n\n".repeat(12)) })
                 LaunchedEffect(list) {
                     snapshotFlow { list.layoutInfo.visibleItemsInfo.firstOrNull { it.key == "layout/trace/" }?.offset }
-                        .collect { if (it != null) positions.add(it) }
+                        .collect { positions.add(it) }
                 }
                 ChatMessages(listOf(turn), "", Modifier.fillMaxSize(), list,
-                    contentPadding = PaddingValues(top = 72.dp, bottom = 112.dp, start = 16.dp, end = 16.dp))
+                    contentPadding = PaddingValues(top = 72.dp, bottom = 112.dp, start = 16.dp, end = 16.dp),
+                    markdown = markdown, botId = fixture.intValue.toString())
             }
         } } }
         repeat(3) { trial ->
             compose.runOnIdle { fixture.intValue = trial }
+            compose.waitUntil(5000) { markdown.containsKey("$trial/layout/reply/") }
             val toggle = compose.onNodeWithTag("execution_toggle")
             toggle.assertIsDisplayed()
             val top = toggle.getUnclippedBoundsInRoot().top
             compose.runOnIdle { positions.clear() }
             val offset = list.layoutInfo.visibleItemsInfo.first { it.key == "layout/trace/" }.offset
             toggle.performTouchInput { click(center) }
+            compose.waitUntil(5000) { compose.onAllNodesWithTag("execution_trace").fetchSemanticsNodes().isNotEmpty() }
             repeat(20) {
                 compose.mainClock.advanceTimeByFrame()
                 assertEquals("trial=$trial frame=$it offset=$offset changes=$positions first=${list.firstVisibleItemIndex}/${list.firstVisibleItemScrollOffset}", top.value, toggle.getUnclippedBoundsInRoot().top.value, 1f)
             }
-            compose.runOnIdle { assertTrue("trial=$trial offsets=$positions", positions.all { kotlin.math.abs(it - offset) <= 1 }) }
+            compose.runOnIdle { assertTrue("trial=$trial offsets=$positions", positions.all { it != null && kotlin.math.abs(it - offset) <= 1 }) }
         }
     }
 
@@ -65,13 +69,15 @@ class TraceTest {
     }
 
     @Test fun foldingKeepsTheTitleInPlace() {
+        val markdown = mutableStateMapOf<String, Pair<String, com.mikepenz.markdown.model.State>>()
         val turn = ChatTurn("timing", "检查执行过程", status = "done",
             answer = (1..30).joinToString("\n\n") { "**结果 $it**：保留当前页面内容与中文输出。" },
             steps = (1..200).map { TaskStep("timing-$it", "读取页面 $it", detail = "页面内容 $it", done = true) })
         compose.setContent { PhoneBotTheme { Surface(Modifier.fillMaxSize()) {
             ChatMessages(listOf(turn), "", Modifier.fillMaxSize(), focusedTask = turn.id,
-                contentPadding = PaddingValues(horizontal = 16.dp, vertical = 80.dp))
+                contentPadding = PaddingValues(horizontal = 16.dp, vertical = 80.dp), markdown = markdown)
         } } }
+        compose.waitUntil(5000) { markdown.containsKey("/timing/reply/") }
         compose.onNodeWithTag("chat_messages").performScrollToNode(hasTestTag("execution_toggle"))
         repeat(3) {
             val top = compose.onNodeWithTag("execution_toggle").getUnclippedBoundsInRoot().top
@@ -86,12 +92,14 @@ class TraceTest {
 
     @Test fun expandingTheLatestTraceKeepsEarlierMessagesInPlace() {
         val list = androidx.compose.foundation.lazy.LazyListState()
+        val markdown = mutableStateMapOf<String, Pair<String, com.mikepenz.markdown.model.State>>()
         val turns = (1..8).map { index -> ChatTurn("anchor-$index", "第 $index 个请求", status = "done",
             answer = if (index == 8) "" else "第 $index 个结果。".repeat(10),
             steps = (1..40).map { TaskStep("anchor-$index-$it", "工具 $index/$it", done = true) }) }
         compose.setContent { PhoneBotTheme { Surface(Modifier.fillMaxSize()) {
-            ChatMessages(turns, "", Modifier.fillMaxSize(), list)
+            ChatMessages(turns, "", Modifier.fillMaxSize(), list, markdown = markdown)
         } } }
+        compose.waitUntil(5000) { markdown.containsKey("/anchor-7/reply/") }
         compose.runOnIdle { list.requestScrollToItem(0, -list.layoutInfo.viewportEndOffset / 2) }
         val toggle = compose.onAllNodesWithTag("execution_toggle").onFirst()
         val prompt = compose.onNodeWithText("第 8 个请求")

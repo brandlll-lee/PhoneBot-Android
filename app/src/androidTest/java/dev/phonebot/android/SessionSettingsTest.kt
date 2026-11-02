@@ -6,6 +6,7 @@ import android.content.ContextWrapper
 import androidx.lifecycle.ViewModelStore
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.platform.app.InstrumentationRegistry
+import com.mikepenz.markdown.model.parseMarkdown
 import java.io.File
 import java.util.UUID
 import org.json.JSONArray
@@ -25,8 +26,10 @@ class SessionSettingsTest {
             }) }
         }
         val saved = File(directory, "chats.json")
-        saved.writeText(JSONArray().put(JSONObject().put("id", "existing").put("title", "历史会话").put("updated", 1)
-            .put("turns", JSONArray().put(JSONObject().put("id", "turn").put("prompt", "你好").put("answer", "你好").put("status", "done").put("steps", JSONArray())))).toString())
+        val turns = JSONArray()
+        repeat(150) { index -> turns.put(JSONObject().put("id", "turn-$index").put("prompt", "你好 $index").put("answer", "**结果** $index").put("status", "done")
+            .put("steps", JSONArray().apply { repeat(50) { step -> put(JSONObject().put("id", "step-$step").put("name", "读屏").put("done", true).put("detail", "页面观察。".repeat(100))) } })) }
+        saved.writeText(JSONArray().put(JSONObject().put("id", "existing").put("title", "历史会话").put("updated", 1).put("turns", turns)).toString())
         val instrumentation = InstrumentationRegistry.getInstrumentation()
         var store = ViewModelStore()
         lateinit var model: PhoneBotModel
@@ -43,6 +46,11 @@ class SessionSettingsTest {
         try {
             create()
             await { model.session?.id == "existing" }
+            repeat(4) { version ->
+                instrumentation.runOnMainSync { model.editBot("保存版本 $version") }
+                android.os.SystemClock.sleep(220)
+            }
+            await { saved.readText().contains("保存版本 3") }
             instrumentation.runOnMainSync {
                 assertEquals("main", model.session?.screen)
                 assertEquals("shizuku", model.session?.helper)
@@ -58,6 +66,8 @@ class SessionSettingsTest {
                 assertEquals("builtin", model.session?.helper)
                 model.choosePhone("shizuku", "main")
                 model.selectSession("existing")
+                assertEquals(150, model.session?.turns?.size)
+                assertEquals(50, model.session?.turns?.last()?.steps?.size)
                 assertEquals("音乐搭档", model.session?.title)
                 assertEquals("provider-a", model.provider)
                 assertEquals("model-a", model.model)
@@ -79,6 +89,11 @@ class SessionSettingsTest {
                 model.newSession()
                 assertEquals("builtin", model.session?.helper)
                 assertEquals("virtual", model.session?.screen)
+                model.markdown["existing/turn-149/reply/"] = "**结果** 149" to parseMarkdown("**结果** 149")
+                model.submissions["existing"] = "turn-149"
+                model.deleteSession("existing")
+                assertFalse(model.markdown.keys.any { it.startsWith("existing/") })
+                assertFalse(model.submissions.containsKey("existing"))
             }
         } finally {
             instrumentation.runOnMainSync { store.clear() }
