@@ -5,6 +5,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.graphics.Color
+import androidx.core.graphics.ColorUtils
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -28,14 +29,26 @@ internal object PhoneUi {
     val icon = 22.dp
     val logo = 24.dp
     val bubble = 40.dp
-    val activityDot = 7.dp
+    val identityOverlap = 4.dp
+    val identityGap = 8.dp
+    val activityRing = 1.5.dp
+    const val activityTrackAlpha = .15f
     val hairline = .5.dp
     val blurRadius = 20.dp
     val floatingElevation = 1.dp
     const val glassAlpha = .68f
     val frameLine = 1.dp
     val glowRadius = 8.dp
-    const val glowAlpha = .4f
+    val innerGlowRadius = 5.dp
+    val glowPadding = 20.dp
+    val previewControl = 24.dp
+    val previewControlIcon = 16.dp
+    const val glowAlpha = .55f
+    const val glowBreathMin = .65f
+    const val glowBreathMillis = 2400
+    const val previewScale = .5f
+    const val actionSaturation = .72f
+    const val actionLightness = .34f
     val previewWidth = 280.dp
     const val previewHeightFraction = .70f
     const val bubbleWidthFraction = .88f
@@ -58,8 +71,22 @@ internal object PhoneUi {
     val traceCode = TextStyle(fontSize = 12.sp, lineHeight = 18.sp)
     val traceImageShape = RoundedCornerShape(12.dp)
     val frameShape = RoundedCornerShape(20.dp)
-    val frameContentShape = RoundedCornerShape(19.dp)
 }
+
+internal fun botActionColor(avatarColor: Long): Color {
+    val hsl = FloatArray(3)
+    ColorUtils.colorToHSL(avatarColor.toInt(), hsl)
+    hsl[1] = if (avatarColor == 0L || hsl[1] < .05f) 0f else PhoneUi.actionSaturation
+    hsl[2] = PhoneUi.actionLightness
+    var color = ColorUtils.HSLToColor(hsl)
+    while (ColorUtils.calculateContrast(android.graphics.Color.WHITE, color) < 4.5) {
+        hsl[2] -= .01f
+        color = ColorUtils.HSLToColor(hsl)
+    }
+    return Color(color)
+}
+
+internal val LocalBotActionColor = staticCompositionLocalOf { botActionColor(0L) }
 
 private val Blue = Color(0xFF3985FF)
 private val DarkColors = darkColorScheme(

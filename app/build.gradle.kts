@@ -62,6 +62,8 @@ dependencies {
     implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.11.0")
     implementation("com.mikepenz:multiplatform-markdown-renderer-m3:0.46.0")
     implementation("com.mikepenz:multiplatform-markdown-renderer-code:0.46.0")
+    implementation("com.mikepenz:multiplatform-markdown-renderer-coil3:0.46.0")
+    implementation("io.coil-kt.coil3:coil-network-okhttp:3.6.3")
     implementation("com.google.mlkit:text-recognition:16.0.1")
     implementation("com.google.mlkit:text-recognition-chinese:16.0.1")
     implementation("dev.rikka.shizuku:api:13.1.5")

@@ -39,6 +39,8 @@ import androidx.compose.runtime.saveable.mapSaver
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.graphics.drawscope.clipRect
 import androidx.compose.ui.layout.SubcomposeLayout
 import androidx.compose.ui.unit.dp
 import dev.chrisbanes.haze.*
@@ -174,6 +176,8 @@ class MainActivity : ComponentActivity() {
         }
     }) {
         Scaffold(containerColor = MaterialTheme.colorScheme.background, snackbarHost = { SnackbarHost(snackbar) }, contentWindowInsets = WindowInsets.safeDrawing) { padding ->
+            val actionColor = remember(model.session?.avatarColor) { botActionColor(model.session?.avatarColor ?: 0L) }
+            CompositionLocalProvider(LocalBotActionColor provides actionColor) {
             ChatLayout(Modifier.fillMaxSize().padding(padding).consumeWindowInsets(padding).imePadding(), header = {
                     ChatHeader(model.activeTask.isEmpty(), { scope.launch { drawer.open() } }, { panel = "session" }, model::newSession, { panel = "settings" }, model.session)
                 }, composer = { Column {
@@ -210,6 +214,7 @@ class MainActivity : ComponentActivity() {
                     } else ChatMessages(turns, model.activeTask, Modifier.fillMaxSize(), list, model.focusedTask, messagePadding,
                         model.markdown, botId, model.submissions[botId].orEmpty(), { model.submissions.remove(botId) })
                 }
+            }
             }
         }
     }
@@ -362,10 +367,17 @@ class MainActivity : ComponentActivity() {
         verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(PhoneUi.small)) {
         ToolIcon(Icons.Outlined.Menu, "打开对话列表", conversations, filled = true)
         Box(Modifier.weight(1f), contentAlignment = Alignment.Center) {
-            Surface(onClick = session, interactionSource = identity, modifier = Modifier.heightIn(min = PhoneUi.touch).testTag("chat_identity"),
+            Surface(onClick = session, interactionSource = identity, modifier = Modifier.heightIn(min = PhoneUi.touch).testTag("chat_identity")
+                .semantics { contentDescription = listOfNotNull(bot?.title ?: "PhoneBot", bot?.provider?.takeIf { it.isNotBlank() }).joinToString("，") },
                 shape = CircleShape, color = MaterialTheme.colorScheme.background.copy(alpha = PhoneUi.glassAlpha), shadowElevation = PhoneUi.floatingElevation, border = BorderStroke(PhoneUi.hairline, MaterialTheme.colorScheme.outlineVariant)) {
-                Row(Modifier.padding(horizontal = PhoneUi.inset), horizontalArrangement = Arrangement.spacedBy(PhoneUi.small, Alignment.CenterHorizontally), verticalAlignment = Alignment.CenterVertically) {
-                    BotAvatar(bot?.avatarColor ?: 0L, Modifier.size(PhoneUi.logo), working = !idle, interactionSource = identity)
+                Row(Modifier.padding(horizontal = PhoneUi.inset), horizontalArrangement = Arrangement.spacedBy(PhoneUi.identityGap, Alignment.CenterHorizontally), verticalAlignment = Alignment.CenterVertically) {
+                    val provider = bot?.provider.orEmpty()
+                    Box(Modifier.width(if (provider.isEmpty()) PhoneUi.logo else PhoneUi.logo + PhoneUi.icon - PhoneUi.identityOverlap).height(PhoneUi.logo)) {
+                        if (provider.isNotEmpty()) ProviderIcon(provider, Modifier.align(Alignment.CenterEnd).drawWithContent {
+                            clipRect(left = PhoneUi.identityOverlap.toPx()) { this@drawWithContent.drawContent() }
+                        })
+                        BotAvatar(bot?.avatarColor ?: 0L, Modifier.size(PhoneUi.logo), working = !idle, interactionSource = identity)
+                    }
                     Text(bot?.title ?: "PhoneBot", modifier = Modifier.weight(1f, fill = false), style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 }
             }
@@ -461,9 +473,9 @@ private fun helperStateName(state: String?): String = when (state) {
             val enabled = busy || (input.isNotBlank() && ready)
             IconButton(onClick = if (busy) cancel else send, enabled = enabled,
                 modifier = Modifier.align(Alignment.BottomEnd).size(PhoneUi.touch).semantics { contentDescription = if (busy) "停止任务" else "发送任务" }) {
-                Box(Modifier.size(PhoneUi.send).background(MaterialTheme.colorScheme.surfaceContainerHighest, CircleShape), contentAlignment = Alignment.Center) {
-                    if (busy) Box(Modifier.size(PhoneUi.inset).background(MaterialTheme.colorScheme.onSurface, MaterialTheme.shapes.small))
-                    else Icon(Icons.AutoMirrored.Filled.ArrowForward, null, tint = MaterialTheme.colorScheme.onSurface.copy(alpha = if (enabled) 1f else PhoneUi.disabledAlpha), modifier = Modifier.size(PhoneUi.icon).rotate(-90f))
+                Box(Modifier.size(PhoneUi.send).testTag("task_action").background(if (enabled) LocalBotActionColor.current else MaterialTheme.colorScheme.surfaceContainerHighest, CircleShape), contentAlignment = Alignment.Center) {
+                    if (busy) Box(Modifier.size(PhoneUi.inset).background(Color.White, MaterialTheme.shapes.small))
+                    else Icon(Icons.AutoMirrored.Filled.ArrowForward, null, tint = if (enabled) Color.White else MaterialTheme.colorScheme.onSurface.copy(alpha = PhoneUi.disabledAlpha), modifier = Modifier.size(PhoneUi.icon).rotate(-90f))
                 }
             }
         }

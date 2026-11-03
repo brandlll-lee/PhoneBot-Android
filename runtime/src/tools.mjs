@@ -24,7 +24,7 @@ const actions = [
 const batch = Type.Union(actions.map(([name, , , schema]) => Type.Object({ tool: Type.Literal(name),
   args: Type.Object(schema, { additionalProperties: false }) }, { additionalProperties: false })));
 const definitions = [
-  ["screen_read", "读取页面", "Read all visible elements in a full snapshot. Each element has id, parent, text, description, label, clickable, scrollable, editable, enabled, selected, checked and screen-pixel bounds. parent identifies its containing element; inspect children to interpret a container's label. scrollable marks regions to explore with swipe. ocr:true adds recognized text and positions; image:true adds a screenshot for vision models. Actions return these elements as a full snapshot or a diff with baseSnapshot, added, updated and removed.", { ocr: Type.Optional(Type.Boolean()), image: Type.Optional(Type.Boolean()) }],
+  ["screen_read", "读取页面", "Read all visible elements in a full snapshot. Each element has id, parent, text, description, label, clickable, scrollable, editable, enabled, selected, checked and screen-pixel bounds. Omitted element fields default to parent:null, resourceId/text/description:empty, enabled:true and other flags:false. parent identifies its containing element; inspect children to interpret a container's label. scrollable marks regions to explore with swipe. ocr:true adds recognized text and positions; image:true adds a screenshot for vision models. Actions return these elements as a full snapshot or a diff with baseSnapshot, added, updated and removed.", { ocr: Type.Optional(Type.Boolean()), image: Type.Optional(Type.Boolean()) }],
   ["screenshot", "截取屏幕", "Capture the session's selected display. Returns an image for vision models.", {}],
   ["app_list", "查看应用", "List launchable apps and package names.", {}],
   ["device_status", "读取设备设置", "Read actual media volume/mute, brightness, Wi-Fi and system-command availability.", {}],
@@ -39,19 +39,34 @@ const definitions = [
   ["do_steps", "连续操作", 'Execute 1–12 known actions using the same arguments, waits and checks as single actions. Current element IDs are allowed; use semantic selectors on later pages. Stop at unknown UI. Example: input_text {resourceId:"known input",text:"query"}, tap {text:"Search",expect:{resourceId:"known result",text:"query"}}. Do not batch payments, sending, deletion, login or confirmations.', { steps: Type.Array(batch, { minItems: 1, maxItems: 12 }) }],
 ];
 
+const elementDefaults = { resourceId: "", text: "", description: "", parent: null, enabled: true,
+  clickable: false, editable: false, focused: false, selected: false, scrollable: false, checkable: false, checked: false };
+
+export function modelResult(value) {
+  if (Array.isArray(value)) return value.map(modelResult);
+  if (!value || typeof value !== "object") return value;
+  const element = typeof value.id === "string" && Array.isArray(value.bounds);
+  return Object.fromEntries(Object.entries(value).filter(([key, item]) =>
+    !element || !Object.hasOwn(elementDefaults, key) || item !== elementDefaults[key])
+    .map(([key, item]) => [key, modelResult(item)]));
+}
+
 export function phoneTools(host, model, attachment = () => {}, images) {
   const tools = definitions.map(([name, label, description, schema]) => ({
     name, label, description, parameters: Type.Object(schema, { additionalProperties: false }),
     async execute(id, params, signal) {
       const details = await host(name, params, signal, id);
       const { image, ...view } = details;
-      const content = [{ type: "text", text: JSON.stringify(view) }];
+      const content = [];
       if (image) {
         if (!model.input.includes("image")) throw new Error("当前模型不支持图片。请选择视觉模型，或使用控件树和 OCR。");
         const { readFile } = await import("node:fs/promises");
         attachment(image);
-        content.push({ type: "image", data: (await readFile(image)).toString("base64"), mimeType: details.imageInfo?.mimeType || "image/jpeg" });
+        const block = { type: "image", data: (await readFile(image)).toString("base64"), mimeType: details.imageInfo?.mimeType || "image/jpeg" };
+        if (images) view.imageReference = images.uri(await images.archive(block));
+        content.push(block);
       }
+      content.unshift({ type: "text", text: JSON.stringify(modelResult(view)) });
       return { content, details: view, isError: view.ok === false };
     },
   }));
@@ -59,7 +74,9 @@ export function phoneTools(host, model, attachment = () => {}, images) {
     parameters: Type.Object({ reference: Type.String({ pattern: "^[a-f0-9]{64}$" }) }, { additionalProperties: false }),
     execute: async (_id, { reference }) => {
       if (!model.input.includes("image")) throw new Error("当前模型不支持图片。请选择视觉模型。");
-      return { content: [await images.recall(reference)], details: { reference } };
+      const image = await images.recall(reference);
+      const details = { reference, imageReference: images.uri(reference) };
+      return { content: [{ type: "text", text: JSON.stringify(details) }, image], details };
     } });
   return tools;
 }

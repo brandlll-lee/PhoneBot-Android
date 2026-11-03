@@ -43,9 +43,9 @@ internal fun providerIconResource(id: String): Int? = when (id) {
     else -> null
 }
 
-@Composable internal fun ProviderIcon(id: String) {
+@Composable internal fun ProviderIcon(id: String, modifier: Modifier = Modifier) {
     val resource = providerIconResource(id)
-    val modifier = Modifier.size(PhoneUi.icon).testTag("provider-icon-$id")
-    if (resource == null) Icon(Icons.Outlined.AccountCircle, null, modifier)
-    else Icon(painterResource(resource), null, modifier)
+    val iconModifier = modifier.size(PhoneUi.icon).testTag("provider-icon-$id")
+    if (resource == null) Icon(Icons.Outlined.AccountCircle, null, iconModifier)
+    else Icon(painterResource(resource), null, iconModifier)
 }

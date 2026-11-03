@@ -19,7 +19,6 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.repeatOnLifecycle
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 
@@ -29,32 +28,30 @@ import kotlinx.coroutines.launch
     val blink = remember { Animatable(1f) }
     val activity = remember { Animatable(0f) }
     val wink = remember { Animatable(0f) }
+    val motion = (rememberCoroutineScope().coroutineContext[MotionDurationScale]?.scaleFactor ?: 1f) > 0f
     var reaction by remember { mutableIntStateOf(0) }
     LaunchedEffect(interactionSource) {
         interactionSource?.interactions?.collect { if (it is PressInteraction.Press) reaction++ }
     }
-    LaunchedEffect(lifecycle, working, reaction) {
+    LaunchedEffect(lifecycle, working, reaction, motion) {
         lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
-            val duration = coroutineContext[MotionDurationScale]
-            snapshotFlow { duration?.scaleFactor ?: 1f }.collectLatest { factor ->
-                blink.snapTo(1f); activity.snapTo(0f); wink.snapTo(0f)
-                if (factor <= 0f) return@collectLatest
-                if (reaction > 0) {
-                    wink.animateTo(1f, tween(120)); delay(70)
-                    wink.animateTo(0f, tween(170))
-                }
-                coroutineScope {
-                    launch {
-                        while (isActive) {
-                            delay(4200)
-                            blink.animateTo(.08f, tween(100)); blink.animateTo(1f, tween(140))
-                        }
+            blink.snapTo(1f); activity.snapTo(0f); wink.snapTo(0f)
+            if (!motion) return@repeatOnLifecycle
+            if (reaction > 0) {
+                wink.animateTo(1f, tween(120)); delay(70)
+                wink.animateTo(0f, tween(170))
+            }
+            coroutineScope {
+                launch {
+                    while (isActive) {
+                        delay(4200)
+                        blink.animateTo(.08f, tween(100)); blink.animateTo(1f, tween(140))
                     }
-                    if (working) launch {
-                        while (isActive) {
-                            activity.animateTo(1f, tween(1800, easing = FastOutSlowInEasing))
-                            activity.animateTo(-1f, tween(3600, easing = FastOutSlowInEasing))
-                        }
+                }
+                if (working) launch {
+                    while (isActive) {
+                        activity.animateTo(1f, tween(1800, easing = FastOutSlowInEasing))
+                        activity.animateTo(-1f, tween(3600, easing = FastOutSlowInEasing))
                     }
                 }
             }

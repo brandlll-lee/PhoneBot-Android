@@ -19,6 +19,7 @@ import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.layout.LocalPinnableContainer
 import androidx.compose.ui.layout.PinnableContainer
@@ -122,8 +123,8 @@ private data class ChatRow(val turn: ChatTurn, val part: String, val step: TaskS
             when (row.part) {
                 "prompt" -> BoxWithConstraints(Modifier.fillMaxWidth().padding(bottom = PhoneUi.gap), contentAlignment = Alignment.CenterEnd) {
                     SelectionContainer(Modifier.widthIn(max = maxWidth * PhoneUi.bubbleWidthFraction).clip(MaterialTheme.shapes.large)
-                        .background(colors.surfaceContainerLow).padding(PhoneUi.space, PhoneUi.inset).testTag("user_message")) {
-                        Text(turn.prompt, style = MaterialTheme.typography.bodyLarge)
+                        .background(LocalBotActionColor.current).padding(PhoneUi.space, PhoneUi.inset).testTag("user_message")) {
+                        Text(turn.prompt, color = Color.White, style = MaterialTheme.typography.bodyLarge)
                     }
                 }
                 "trace" -> {
@@ -146,7 +147,7 @@ private data class ChatRow(val turn: ChatTurn, val part: String, val step: TaskS
                 "waiting" -> Text("正在等待模型", color = colors.onSurfaceVariant, style = PhoneUi.traceBody, modifier = Modifier.padding(start = 30.dp, top = 8.dp, bottom = 8.dp))
                 "step" -> {
                     val step = checkNotNull(row.step)
-                    TraceEntry(step, running, markdown["$botId/${row.key}"]?.second)
+                    TraceEntry(step, running, markdown["$botId/${row.key}"]?.second, botId)
                 }
                 "image" -> {
                     val bitmap by produceState<android.graphics.Bitmap?>(null, turn.image) {
@@ -163,7 +164,7 @@ private data class ChatRow(val turn: ChatTurn, val part: String, val step: TaskS
                         if (container != null) replyContainers[turn.id] = container
                         onDispose { replyContainers.remove(turn.id) }
                     }
-                    MarkdownAnswer.Content(turn.answer.ifEmpty { turn.streamText }, running && turn.answer.isEmpty(), state = markdown["$botId/${row.key}"]?.second)
+                    MarkdownAnswer.Content(turn.answer.ifEmpty { turn.streamText }, running && turn.answer.isEmpty(), state = markdown["$botId/${row.key}"]?.second, botId = botId)
                 }
             }
         }
@@ -188,7 +189,7 @@ private data class ChatRow(val turn: ChatTurn, val part: String, val step: TaskS
     }
 }
 
-@Composable private fun TraceEntry(step: TaskStep, running: Boolean, text: State?) {
+@Composable private fun TraceEntry(step: TaskStep, running: Boolean, text: State?, botId: String) {
     val colors = MaterialTheme.colorScheme
     Row(Modifier.fillMaxWidth().drawBehind {
         drawLine(colors.outlineVariant, Offset(8.dp.toPx(), 0f), Offset(8.dp.toPx(), size.height), 1.dp.toPx())
@@ -219,7 +220,7 @@ private data class ChatRow(val turn: ChatTurn, val part: String, val step: TaskS
                     Text("思考", color = colors.onSurfaceVariant, style = PhoneUi.traceCode)
                     SelectionContainer { Text(step.detail, color = colors.onSurfaceVariant, style = PhoneUi.traceBody) }
                 }
-                "text" -> MarkdownAnswer.Content(step.detail, running && !step.done, colors.onSurfaceVariant, text)
+                "text" -> MarkdownAnswer.Content(step.detail, running && !step.done, colors.onSurfaceVariant, text, botId)
                 else -> SelectionContainer { Text(step.detail, color = if (step.error) colors.error else colors.onSurfaceVariant, style = PhoneUi.traceBody) }
             }
         }

@@ -32,9 +32,9 @@ You give the task. It takes action.
 - **Keep the conversation going.** Pi manages sessions, restoration and automatic context compaction. Reopen PhoneBot to continue an existing conversation.
 - **Operate your phone.** Open apps, read screens, tap, swipe, enter Chinese text, go Back and go Home. Use Chinese/English OCR or screenshots when needed.
 - **Choose the execution screen.** Operate the main screen or use a separate virtual display. Each Bot saves its model, screen and helper choice.
-- **Watch it work.** Tap the bubble to view the live virtual display. Tap the image to collapse it. A blue dot marks an active task. Choose light, dark or system appearance.
+- **Watch it work.** A ring in the Bot's color marks an active task. Tap the bubble for a small preview, expand it when needed, or tap the image to collapse it. Choose light, dark or system appearance.
 - **Handle everyday settings.** Read and adjust media volume, set brightness and open system settings. Use system apps for alarms, timers and calendar entries.
-- **Follow the process.** Expand the trace to inspect returned thinking, intermediate text, tool calls and results. Final replies support Markdown, tables and code blocks.
+- **Follow the process.** Expand the trace to inspect returned thinking, intermediate text, tool calls and results. Final replies support Markdown images, file links, tables and code blocks.
 - **Stop at any time.** Run different Bots on independent virtual displays. Tasks pause when a required permission is missing. Stop the current task or return to its conversation from a result notification.
 
 Create named Bots with colored avatars. Independent virtual displays run in parallel. Main-screen tasks and access to the same app queue. Tap the top avatar to configure a Bot. Use the drawer footer for software settings.

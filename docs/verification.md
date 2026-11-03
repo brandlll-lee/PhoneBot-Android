@@ -68,6 +68,15 @@ The lifecycle test deliberately kills the engine process. Accessibility runs in 
 
 ## Validation record
 
+Validated on 2026-11-03 for inline images, Bot styling and token budgets:
+
+- Runtime: 28 tests passed. JVM: 9 passed. APK builds, lint, runtime hash and 16 KB ZIP alignment passed. Pi tests cover early compaction after restoration and between tool turns, retained tools, summary usage, stable screenshot references and final Markdown output.
+- All 246 JSON results from the recorded long session passed default-field restoration. They retain 8,697 elements. Model-text bytes fell from 3,233,334 to 1,878,389. This is a 41.9% byte reduction, not a token estimate.
+- A real DeepSeek Flash comparison completed two controlled tasks per group: original output, compact output, early Pi compaction and both changes. All eight selected the correct target. The combined group's catalog-based usage cost was USD 0.034153 versus USD 0.130499 for the baseline, including summaries. The next eight repeat attempts returned HTTP 402. This small sample does not establish general quality or cost parity. The fixture uses fixed pages and a prior-usage value to trigger native compaction; it is not a full third-party app search.
+- S21, Android 14, ARM64: 30 final UI/preview tests passed. Another 16 passed at 1.3 font scale. Separate runs passed the native Pi session, two engine checks, main-screen overlay, theme sync, parallel-Bot isolation, resource queues and Chinese phone-tool input. Tests preserved provider accounts and existing data.
+- The physical preview test uses screen-coordinate taps after dragging, then checks half/full sizes, resize, collapse, focus and screenshot isolation. It passes at normal and zero system animation scale. The Logo work/press/lifecycle tests also pass. Native window-move animation is disabled through the Android 14 API.
+- Same-device preview sampling in a non-debuggable diagnostic build improved P95 from 61 ms to 7 ms when shadow opacity moved to cached native layers. The 3-second final sample recorded 325 frames and zero janky frames. The final debug APK recorded 321 frames, P95 9 ms and 0.62% janky frames. These short samples do not establish sustained performance for all tasks. The existing 200-step trace stress case still had slow frames: diagnostic-build total-frame P50/P95 were 39.6/56.4 ms. Actual rotation and an external file viewer were not tested separately.
+
 Validated on 2026-11-02 for chat entry, submission and action feedback:
 
 - Runtime: 24 tests passed through real Pi source and bundle requests. JVM: 9 passed. APK builds, lint, runtime hash and 16 KB ZIP alignment passed. S21: 30 selected tests passed, plus 10 at 1.3 font scale and the native Pi session test. They cover first-content positions, Bot switches, sending during streaming, trace anchors, keyboard dismissal and large-history saves.

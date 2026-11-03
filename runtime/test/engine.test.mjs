@@ -70,6 +70,41 @@ function engine(t, entry = "src/main.mjs", baseUrl, savedHome) {
 }
 
 for (const entry of ["src/main.mjs", "dist/engine.mjs"]) {
+  test(`${entry}: Pi compacts between phone tool turns and records summary usage`, async (t) => {
+    let turn = 0;
+    const payloads = [];
+    const fixture = await startFixture({ onRequest: (body) => payloads.push(body),
+      turns: (body) => !body.tools?.length ? { content: "The user requested the current page; screen_read returned snapshot 1." }
+        : ++turn === 1 ? { tool_calls: [{ index: 0, id: "read", type: "function", function: { name: "screen_read", arguments: "{}" } }] }
+        : { content: "已读取当前页面。" },
+      usage: (body) => ({ prompt_tokens: body.tools?.length && turn === 1 ? 140000 : 1000, completion_tokens: 20,
+        total_tokens: body.tools?.length && turn === 1 ? 140020 : 1020 }),
+    });
+    t.after(fixture.close);
+    const home = mkdtempSync(fileURLToPath(new URL("../../.tools/session-test-", import.meta.url)));
+    t.after(() => rmSync(home, { recursive: true, force: true }));
+    mkdirSync(`${home}/transcripts`);
+    writeFileSync(`${home}/transcripts/conversation.json`, JSON.stringify(Array.from({ length: 4 }, (_, i) => [
+      { role: "user", content: `历史页面 ${i}`, timestamp: i + 1 },
+      { role: "assistant", api: "openai-completions", provider: "deepseek", model: "deepseek-flash", stopReason: "stop",
+        content: [{ type: "text", text: "已结束的页面记录。".repeat(6000) }], timestamp: i + 1,
+        usage: { input: 10000, output: 20, cacheRead: 0, cacheWrite: 0, totalTokens: 10020,
+          cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } } },
+    ]).flat()));
+    const host = engine(t, entry, fixture.baseUrl, home);
+    await host.next("ready");
+    host.send({ type: "task", session: "conversation", provider: "deepseek", model: "deepseek-flash", prompt: "读取当前页面" });
+    const tool = await host.next("tool");
+    host.send({ type: "tool_result", id: tool.id, result: { kind: "full", snapshot: 1, elements: [{ id: "e1", text: "当前页面" }] } });
+    assert.equal((await host.next("result")).text, "已读取当前页面。");
+    const compacted = host.seen.find((event) => event.type === "compaction_end");
+    assert.equal(compacted?.aborted, false);
+    assert.equal(compacted.usage.input, payloads.filter((body) => !body.tools?.length).length * 1000);
+    assert.ok(host.entries().some((entry) => entry.type === "compaction"));
+    assert.equal(payloads.at(-1).tools.length, 21);
+    assert.ok(JSON.stringify(payloads.at(-1)).includes("当前页面"));
+  });
+
   test(`${entry}: official sessions migrate, compact, resume and keep phone tools`, { timeout: 20000 }, async (t) => {
     const payloads = [];
     const summary = "The previous music request ended without finding a ranking. The user stopped it. Continue only from the next user message.";
@@ -88,7 +123,7 @@ for (const entry of ["src/main.mjs", "dist/engine.mjs"]) {
       { role: "user", content: `旧请求${i}：查听歌次数`, timestamp: i + 1 },
       { role: "assistant", api: "openai-completions", provider: "deepseek", model: "deepseek-flash", stopReason: "stop",
         content: [{ type: "text", text: `旧结束${i}：未找到，用户已停止。${"页面记录。".repeat(16000)}` }],
-        usage: { input: 990000, output: 20, cacheRead: 0, cacheWrite: 0, totalTokens: 990020,
+        usage: { input: 140000, output: 20, cacheRead: 0, cacheWrite: 0, totalTokens: 140020,
           cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } }, timestamp: i + 1 },
     ]).flat();
     writeFileSync(`${home}/transcripts/conversation.json`, JSON.stringify(history));
@@ -100,6 +135,10 @@ for (const entry of ["src/main.mjs", "dist/engine.mjs"]) {
     assert.equal(compacted.reason, "threshold");
     assert.equal(compacted.aborted, false);
     assert.equal(compacted.error, undefined);
+    assert.equal(compacted.contextWindow - compacted.compaction.reserveTokens, 131072);
+    assert.equal(compacted.compaction.keepRecentTokens, 20000);
+    assert.ok(compacted.durationMs >= 0);
+    assert.ok(compacted.usage);
     const read = await host.next("tool");
     assert.equal(read.name, "screen_read");
     host.send({ type: "tool_result", id: read.id, result: { kind: "full", snapshot: 1, elements: [{ id: "e1", text: "当前页面" }] } });

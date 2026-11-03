@@ -55,7 +55,8 @@ class PhoneTestReceiver : BroadcastReceiver() {
                     }
                     if (name == "test_overlay") {
                         if (params.optBoolean("show")) {
-                            service.overlay!!.update(JSONObject().put("taskId", "overlay-test").put("session", "overlay-test").put("prompt", "检查执行屏幕"), target)
+                            service.overlay!!.update(JSONObject().put("taskId", "overlay-test").put("session", "overlay-test").put("prompt", "检查执行屏幕")
+                                .put("avatarColor", params.optLong("avatarColor")), target)
                         }
                         if (params.optBoolean("close")) service.overlay?.close()
                         return@withTimeout JSONObject().put("displayId", target.displayId).put("appearance", dev.phonebot.android.PhoneAppearance.mode.name)

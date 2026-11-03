@@ -57,11 +57,13 @@ class TraceTest {
     }
 
     @Test fun latestReplyStartsAtItsEndAndHistoryStaysInPlace() {
+        val markdown = mutableStateMapOf<String, Pair<String, com.mikepenz.markdown.model.State>>()
         val turns = mutableStateOf((1..20).map { index -> ChatTurn("latest-$index", "任务 $index", status = "done",
             answer = (1..40).joinToString("\n\n") { "第 $index 项，第 $it 段内容。" } + "\n\n末段 $index") })
         compose.setContent { PhoneBotTheme { Surface(Modifier.fillMaxSize()) {
-            ChatMessages(turns.value, "", Modifier.fillMaxSize())
+            ChatMessages(turns.value, "", Modifier.fillMaxSize(), markdown = markdown)
         } } }
+        compose.waitUntil(5000) { markdown.containsKey("/latest-20/reply/") }
         compose.onNodeWithText("末段 20", substring = true).assertIsDisplayed()
         compose.onNodeWithTag("chat_messages").performScrollToNode(hasText("任务 10"))
         compose.runOnIdle { turns.value = turns.value + ChatTurn("latest-21", "任务 21", status = "done", answer = "新结果") }

@@ -23,6 +23,13 @@ test("screenshots become Pi image content only for a vision model", async (t) =>
   assert.equal(result.details.imageInfo.screenPerImageY, 1.875);
   assert.equal(attachment, path);
   assert.equal(result.details.image, undefined);
+  const images = imageStore(directory, "image-bot", host);
+  const linked = phoneTools(host, { input: ["text", "image"] }, undefined, images).find((item) => item.name === "screenshot");
+  const delivered = await linked.execute("linked", {});
+  const uri = delivered.details.imageReference;
+  assert.match(uri, /^phonebot:\/\/images\/image-bot\/[a-f0-9]{64}\.source$/);
+  assert.equal(JSON.parse(delivered.content[0].text).imageReference, uri);
+  assert.deepEqual(await readFile(join(directory, uri.split("/").at(-1))), jpeg);
   const textTool = phoneTools(host, { input: ["text"] }).find((item) => item.name === "screenshot");
   await assert.rejects(textTool.execute("text", {}), /不支持图片/);
 });
@@ -50,6 +57,10 @@ test("history images have durable references, user images stay visible, and reca
   assert.equal(await readFile(join(directory, `${reference}.source`), "utf8"), "original PNG bytes");
   assert.deepEqual(await images.recall(reference), first[1].content.at(-1));
   assert.equal(encodings, 1);
+  const recall = phoneTools(async () => ({}), { input: ["image"] }, undefined, images).find((item) => item.name === "image_recall");
+  const recalled = await recall.execute("recall", { reference });
+  assert.equal(JSON.parse(recalled.content[0].text).imageReference, images.uri(reference));
+  assert.deepEqual(recalled.content[1], await images.recall(reference));
   const next = await images.project([screen, user, { role: "toolResult", toolCallId: "new-screen", content: [png] }]);
   assert.deepEqual(next.slice(0, 2), first);
   assert.equal(next[2].content.at(-1).type, "image");

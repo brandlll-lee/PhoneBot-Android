@@ -1,6 +1,6 @@
 import { createServer } from "node:http";
 
-export async function startFixture({ hang = false, fail = false, tool = "runtime_info", params = {}, turns, onRequest } = {}) {
+export async function startFixture({ hang = false, fail = false, tool = "runtime_info", params = {}, turns, onRequest, usage } = {}) {
   let requests = 0;
   let toolResult;
   let payload;
@@ -21,6 +21,7 @@ export async function startFixture({ hang = false, fail = false, tool = "runtime
     for (const [part, reason] of [[delta, null], [{}, delta.tool_calls ? "tool_calls" : "stop"]]) {
       response.write(`data: ${JSON.stringify({ id: "probe", object: "chat.completion.chunk", created: 1, model: "phonebot-probe", choices: [{ index: 0, delta: part, finish_reason: reason }] })}\n\n`);
     }
+    if (usage) response.write(`data: ${JSON.stringify({ id: "probe", choices: [], usage: usage(body, requests) })}\n\n`);
     response.end("data: [DONE]\n\n");
   });
   await new Promise((resolve, reject) => {

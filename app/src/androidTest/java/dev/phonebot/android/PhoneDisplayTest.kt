@@ -370,7 +370,7 @@ class PhoneDisplayTest {
         assertTrue(preview.toString(), preview.getInt("width") <= 360)
         val original = screen(displayId)
         assertEquals(original.getInt("height").toDouble() / original.getInt("width"), preview.getInt("height").toDouble() / preview.getInt("width"), 0.01)
-        call("test_overlay", JSONObject().put("show", true))
+        call("test_overlay", JSONObject().put("show", true).put("avatarColor", 0xFF8B5CF6L))
         val bubble = Rect().also { overlay("查看 Agent 屏幕").getBoundsInScreen(it) }
         shell("input -d 0 swipe ${bubble.centerX()} ${bubble.centerY()} ${bubble.centerX() + 200} ${bubble.centerY() + 300} 500")
         val moved = Rect()
@@ -385,6 +385,28 @@ class PhoneDisplayTest {
         val insets = metrics.windowInsets.getInsetsIgnoringVisibility(WindowInsets.Type.systemBars() or WindowInsets.Type.displayCutout())
         val card = Rect().also { overlay("收起 Agent 屏幕").window.getBoundsInScreen(it) }
         assertTrue("Preview covers system bars: $card / ${metrics.bounds} / $insets", card.top >= insets.top && card.bottom <= metrics.bounds.bottom - insets.bottom)
+        clickOverlay("放大 Agent 屏幕")
+        overlay("缩小 Agent 屏幕")
+        val full = Rect().also { overlay("收起 Agent 屏幕").getBoundsInScreen(it) }
+        assertEquals("Small preview width", full.width().toDouble() / 2, frame.width().toDouble(), 2.0)
+        assertEquals("Small preview height", full.height().toDouble() / 2, frame.height().toDouble(), 2.0)
+        val fullWindow = Rect()
+        val resizeDeadline = SystemClock.uptimeMillis() + 3000
+        do {
+            overlay("收起 Agent 屏幕").window.getBoundsInScreen(fullWindow)
+            if (fullWindow.width() > card.width() && fullWindow.height() > card.height()) break
+            SystemClock.sleep(50)
+        } while (SystemClock.uptimeMillis() < resizeDeadline)
+        assertTrue("Preview window kept its small bounds", fullWindow.width() > card.width() && fullWindow.height() > card.height())
+        captureOverlay("overlay-virtual-large.jpg")
+        shell("dumpsys gfxinfo ${context.packageName}:engine reset")
+        SystemClock.sleep(3000)
+        val timing = shell("dumpsys gfxinfo ${context.packageName}:engine").lineSequence()
+            .filter { it.contains("frames rendered:") || it.contains("Janky frames:") || it.contains("percentile:") }.joinToString("\n")
+        File(context.cacheDir, "overlay-frame-timing.txt").writeText(timing)
+        instrumentation.sendStatus(2, Bundle().apply { putString("previewFrameTiming", timing) })
+        clickOverlay("缩小 Agent 屏幕")
+        overlay("放大 Agent 屏幕")
         captureOverlay("overlay-virtual.jpg")
         assertEquals("Preview stole main focus", focus, shell("dumpsys window displays").lineSequence().firstOrNull { it.contains("mCurrentFocus=") })
         call("input_text", JSONObject().put("resourceId", "android:id/edit").put("text", "悬浮预览中文测试"))

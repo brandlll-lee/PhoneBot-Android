@@ -28,11 +28,12 @@ export function imageStore(directory, session, host, historical = []) {
       if (!messages.has(message)) messages.set(message, (async () => ({ ...message, content: (await Promise.all(message.content.map(async (block) => {
         if (block.type !== "image") return [block];
         const reference = await archive(block);
-        const note = { type: "text", text: `Archived ${message.role === "user" ? "reference" : "screen"} image: ${reference}. Use image_recall to inspect it. Historical images do not describe the current screen.` };
+        const note = { type: "text", text: `Archived ${message.role === "user" ? "reference" : "screen"} image: ${reference}, ${uri(reference)}. Use image_recall to inspect it. Historical images do not describe the current screen.` };
         return previous.has(message.toolCallId) ? [note] : [note, await recall(reference)];
       }))).flat() }))());
       return messages.get(message);
     }));
   }
-  return { project, recall };
+  function uri(reference) { return `phonebot://images/${session}/${reference}.source`; }
+  return { project, recall, archive, uri };
 }

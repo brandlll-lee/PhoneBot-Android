@@ -3,8 +3,36 @@ import assert from "node:assert/strict";
 import { Agent } from "@earendil-works/pi-agent-core";
 import { createModels, createProvider } from "@earendil-works/pi-ai";
 import { stream, streamSimple } from "@earendil-works/pi-ai/api/openai-completions";
-import { phoneTools } from "../src/tools.mjs";
+import { phoneTools, modelResult } from "../src/tools.mjs";
 import { startFixture } from "../src/fixture.mjs";
+import { imageStore } from "../src/images.mjs";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { join } from "node:path";
+import { fileURLToPath } from "node:url";
+
+test("compact JSON preserves every element, diff baseline and action outcome", async () => {
+  const defaults = { resourceId: "", text: "", description: "", parent: null, enabled: true,
+    clickable: false, editable: false, focused: false, selected: false, scrollable: false, checkable: false, checked: false };
+  const elements = Array.from({ length: 160 }, (_, i) => ({ ...defaults, id: `e${i}`, bounds: [0, i, 1080, i + 1],
+    label: `目标 ${i}`, class: "android.view.View", parent: i ? "e0" : null,
+    ...(i % 2 ? { selected: true, enabled: false, checked: true, resourceId: "result" } : {}) }));
+  const view = { ok: false, executed: true, conditionBefore: false, conditionMet: false, changed: false, durationMs: 0,
+    stopReason: "timeout", error: "目标未出现", screen: { kind: "diff", snapshot: 2, baseSnapshot: 1,
+      added: elements, updated: elements.slice(1, 2), removed: ["previous"], ocr: [] },
+    unknown: { selected: false, enabled: null, text: "", bounds: [] } };
+  const original = structuredClone(view);
+  const compact = modelResult(view);
+  for (const key of ["added", "updated"]) compact.screen[key] = compact.screen[key].map((element) => ({ ...defaults, ...element }));
+  assert.deepEqual(compact, original);
+  assert.deepEqual(view, original);
+  assert.ok(Buffer.byteLength(JSON.stringify(modelResult(view))) < Buffer.byteLength(JSON.stringify(view)) * .7);
+  const invalidDefaults = { id: "e", bounds: [], selected: null, checked: 0, enabled: false, text: null, parent: "" };
+  assert.deepEqual(modelResult(invalidDefaults), invalidDefaults);
+  const result = await phoneTools(async () => view, { input: ["text"] }).find((tool) => tool.name === "do_steps").execute("batch", {});
+  assert.equal(result.isError, true);
+  assert.deepEqual(result.details, original);
+  assert.deepEqual(JSON.parse(result.content[0].text), modelResult(view));
+});
 
 test("Pi dispatches a phone tool and sends its screen result in the next request", async (t) => {
   const fixture = await startFixture({ tool: "screen_read", params: { ocr: true } });
@@ -15,8 +43,8 @@ test("Pi dispatches a phone tool and sends its screen result in the next request
   models.setProvider(createProvider({ id: "fixture", models: [model], auth: { apiKey: { name: "fixture", resolve: async () => ({ auth: { apiKey: "fixture" } }) } }, api: { stream, streamSimple } }));
   const calls = [];
   const screen = { kind: "full", snapshot: 1, treeReadable: true, elements: [
-    { id: "e1", parent: null, label: "中文输入", clickable: false, scrollable: true },
-    { id: "e2", parent: "e1", label: "中文输入", text: "中文输入", clickable: true, scrollable: false },
+    { id: "e1", parent: null, label: "中文输入", clickable: false, scrollable: true, bounds: [0, 0, 1080, 200] },
+    { id: "e2", parent: "e1", label: "中文输入", text: "中文输入", clickable: true, scrollable: false, bounds: [0, 0, 1080, 200] },
   ], ocr: [{ text: "Hello" }] };
   const agent = new Agent({ initialState: { model, tools: phoneTools(async (name, params) => {
     calls.push({ name, params });
@@ -25,7 +53,37 @@ test("Pi dispatches a phone tool and sends its screen result in the next request
   await agent.prompt("读取页面");
   assert.deepEqual(calls, [{ name: "screen_read", params: { ocr: true } }]);
   assert.equal(fixture.evidence().requests, 2);
-  assert.deepEqual(JSON.parse(fixture.evidence().toolResult), screen);
+  assert.deepEqual(JSON.parse(fixture.evidence().toolResult), modelResult(screen));
+  assert.deepEqual(agent.state.messages.find((message) => message.role === "toolResult").details, screen);
+  assert.ok(fixture.payload.tools.find((tool) => tool.function.name === "screen_read").function.description.includes("enabled:true"));
+});
+
+test("Pi can use an archived screenshot directly in its final Markdown answer", async (t) => {
+  const root = fileURLToPath(new URL("../../.tools/tests/", import.meta.url));
+  await mkdir(root, { recursive: true });
+  const directory = await mkdtemp(join(root, "answer-image-"));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const path = join(directory, "screen.jpg"), bytes = Buffer.from([255, 216, 255, 217]);
+  await writeFile(path, bytes);
+  const fixture = await startFixture({ turns: (body) => {
+    const result = body.messages.findLast((message) => message.role === "tool")?.content;
+    if (!result) return { tool_calls: [{ index: 0, id: "screen", type: "function", function: { name: "screenshot", arguments: "{}" } }] };
+    const text = Array.isArray(result) ? result.find((block) => block.type === "text").text : result;
+    return { content: `当前屏幕：\n\n![手机截图](${JSON.parse(text).imageReference})` };
+  } });
+  t.after(fixture.close);
+  const model = { id: "phone", name: "phone", provider: "fixture", api: "openai-completions", baseUrl: fixture.baseUrl,
+    reasoning: false, input: ["text", "image"], contextWindow: 10000, maxTokens: 1000, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 } };
+  const models = createModels();
+  models.setProvider(createProvider({ id: "fixture", models: [model], auth: { apiKey: { name: "fixture", resolve: async () => ({ auth: { apiKey: "fixture" } }) } }, api: { stream, streamSimple } }));
+  const images = imageStore(directory, "image-bot", async () => ({}));
+  const agent = new Agent({ initialState: { model, tools: phoneTools(async () => ({ image: path }), model, undefined, images) }, streamFn: models.streamSimple.bind(models) });
+  await agent.prompt("截取当前屏幕并在回答里显示");
+  const result = agent.state.messages.find((message) => message.role === "toolResult");
+  const answer = agent.state.messages.at(-1).content.find((block) => block.type === "text").text;
+  assert.equal(answer, `当前屏幕：\n\n![手机截图](${result.details.imageReference})`);
+  assert.deepEqual(await readFile(join(directory, result.details.imageReference.split("/").at(-1))), bytes);
+  assert.equal(fixture.evidence().requests, 2);
 });
 
 test("Pi validates phone arguments before dispatch", async (t) => {
