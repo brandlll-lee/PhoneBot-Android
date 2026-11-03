@@ -174,7 +174,7 @@ internal class PhoneExecution(private val service: PhoneAccessibilityService, va
         check(service.available(target)) { if (target.virtual) "虚拟屏连接已断开" else "请亮屏并解锁手机" }
         if (screen.displayId != target.displayId) { screen.reset(); screen.displayId = target.displayId }
         screen.scan()
-        if (name !in setOf("app_launch", "app_send_intent", "phone_open_link")) target.observePackage(screen.latest.optString("package"))
+        if (name !in setOf("app_launch", "app_send_intent", "phone_open_link")) target.observePackage(screen.latest.optString("package"), screen.taskId)
         if (name == "screen_read") return withTimeout(30000) { service.read(screen, target, params.optBoolean("ocr"), params.optBoolean("image")) }
         if (name == "screenshot") return withTimeout(30000) { service.read(screen, target, false, true) }
         return actions.execute(name, params, report)

@@ -45,7 +45,7 @@ class PhoneTestReceiver : BroadcastReceiver() {
                         return@withTimeout JSONObject().put("ok", true)
                     }
                     val target = displays.getOrPut(owner) { PhoneDisplay(context.applicationContext, executor, resources, owner) }
-                    if (name in PhoneSystem.tools) return@withTimeout PhoneSystem(context, executor, target).execute(name, params)
+                    if (name in PhoneSystem.tools) return@withTimeout PhoneSystem(context, executor, target, owner).execute(name, params)
                     while (PhoneAccessibilityService.instance == null) delay(100)
                     val service = checkNotNull(PhoneAccessibilityService.instance) { "无障碍服务未连接" }
                     if (name == "test_preview") {

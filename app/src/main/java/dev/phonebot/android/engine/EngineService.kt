@@ -52,11 +52,14 @@ class EngineService : Service() {
     private val journal by lazy { TaskJournal(File(filesDir, "task-events")) }
     private val shell by lazy { PhoneShell(this) { handler.post { helperStates() } } }
     private val resources = PhoneResources()
+    private val displays = mutableMapOf<String, PhoneDisplay>()
     private inner class Run(val id: String, val start: JSONObject?) {
-        val display = PhoneDisplay(this@EngineService, shell, resources, id).apply {
+        val display = (start?.let { displays.getOrPut(it.getString("session")) {
+            PhoneDisplay(this@EngineService, shell, resources, it.getString("session"))
+        } } ?: PhoneDisplay(this@EngineService, shell, resources, id)).apply {
             if (start != null) select(start.getString("session"), start.optString("helper", "shizuku"), start.optString("screen", "main"))
         }
-        val system = PhoneSystem(this@EngineService, shell, display)
+        val system = PhoneSystem(this@EngineService, shell, display, id)
         var phone: PhoneExecution? = null
         var accessibility: PhoneAccessibilityService? = null
         var toolJob: Job? = null
@@ -175,7 +178,18 @@ class EngineService : Service() {
             command = JSONObject(json)
             when (command.getString("type")) {
                 "helper" -> { helperCommand(command); return }
-                "phone_select" -> { viewedBot = command.getString("session"); updateOverlay(); return }
+                "phone_select" -> {
+                    viewedBot = command.getString("session")
+                    if (runs.values.none { !it.ended && it.start?.optString("session") == viewedBot })
+                        displays[viewedBot]?.select(viewedBot, command.getString("helper"), command.getString("screen"))
+                    updateOverlay(); return
+                }
+                "phone_close" -> {
+                    val bot = command.getString("session")
+                    check(runs.values.none { !it.ended && it.start?.optString("session") == bot }) { "此 Bot 正在执行任务" }
+                    displays.remove(bot)?.release()
+                    return
+                }
                 "stop" -> { stopEngine(); return }
                 "cancel" -> {
                     val run = runs[command.getString("taskId")] ?: return
@@ -225,6 +239,7 @@ class EngineService : Service() {
                         resources.main.lock(id)
                     }
                     run.started = true
+                    if (start != null) command.put("displayId", if (run.display.alive()) run.display.displayId else android.view.Display.INVALID_DISPLAY)
                     write(command)
                 } catch (_: CancellationException) { resources.release(id) }
             }
@@ -251,7 +266,7 @@ class EngineService : Service() {
                 val run = runs[event.optString("taskId")] ?: return
                 scope.launch {
                     run.toolJob?.cancelAndJoin()
-                    run.display.release()
+                    resources.release(run.id)
                     runs.remove(run.id, run)
                     updateWakeLock()
                     publish(state.copy(phase = if (runs.isEmpty()) EnginePhase.READY else EnginePhase.RUNNING))
@@ -411,7 +426,7 @@ class EngineService : Service() {
         runs.values.filter { it.start != null && !it.ended }.forEach { emit(JSONObject().put("type", "cancelled").put("taskId", it.id).put("message", "引擎已停止")) }
         closing = true
         releaseWakeLock()
-        runs.values.forEach { it.startJob?.cancel(); it.toolJob?.cancel(); it.display.release() }; runs.clear()
+        releaseRuns()
         helperJob?.cancel()
         shell.close()
         handler.removeCallbacks(startupDeadline)
@@ -430,7 +445,7 @@ class EngineService : Service() {
         }
         closing = true
         releaseWakeLock()
-        runs.values.forEach { it.startJob?.cancel(); it.toolJob?.cancel(); it.display.release() }; runs.clear()
+        releaseRuns()
         helperJob?.cancel()
         shell.close()
         handler.removeCallbacksAndMessages(null)
@@ -451,9 +466,14 @@ class EngineService : Service() {
         }
     }
 
+    private fun releaseRuns() {
+        runs.values.forEach { it.startJob?.cancel(); it.toolJob?.cancel(); resources.release(it.id) }; runs.clear()
+        displays.values.forEach { it.release() }; displays.clear()
+    }
+
     override fun onDestroy() {
         releaseWakeLock()
-        runs.values.forEach { it.startJob?.cancel(); it.toolJob?.cancel(); it.display.release() }; runs.clear()
+        releaseRuns()
         shell.close()
         writer?.close()
         scope.cancel()

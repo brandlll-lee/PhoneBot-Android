@@ -1,6 +1,11 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <application>
         <receiver android:name=".testing.PhoneTestReceiver" android:exported="false" android:process=":engine" />
-        <activity android:name=".testing.PhoneTestActivity" android:exported="true" android:permission="android.permission.DUMP" />
+        <activity android:name=".testing.PhoneTestActivity" android:exported="true" android:permission="android.permission.DUMP">
+            <intent-filter>
+                <action android:name="dev.phonebot.android.TEST" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
+        </activity>
     </application>
 </manifest>

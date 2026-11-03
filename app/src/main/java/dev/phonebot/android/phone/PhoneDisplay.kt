@@ -61,14 +61,14 @@ internal class PhoneDisplay(private val context: Context, private val shell: Pho
         (0 until rows.length()).map(rows::getJSONObject)
     }
 
-    suspend fun reserve(intent: Intent) {
+    suspend fun reserve(intent: Intent, owner: String = this.owner) {
         val name = intent.component?.packageName ?: intent.`package` ?: intent.resolveActivity(context.packageManager)?.packageName
         require(!name.isNullOrEmpty()) { "找不到可处理此请求的应用" }
         resources.app(owner, name)
     }
 
-    suspend fun launch(intent: Intent) {
-        reserve(intent)
+    suspend fun launch(intent: Intent, owner: String = this.owner) {
+        reserve(intent, owner)
         prepare()
         if (virtual) withContext(Dispatchers.IO) { check(checkNotNull(screen).service.launch(displayId, intent)) { "系统拒绝在虚拟屏启动应用" } }
         else context.startActivity(intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
@@ -78,12 +78,12 @@ internal class PhoneDisplay(private val context: Context, private val shell: Pho
         check(checkNotNull(screen).service.touch(displayId, x, y, endX, endY, duration)) { "系统未执行虚拟屏触摸，请检查屏幕与锁屏状态" }
     }
     suspend fun key(code: Int) = withContext(Dispatchers.IO) { check(checkNotNull(screen).service.key(displayId, code)) { "系统未执行虚拟屏按键" } }
-    suspend fun paste(text: String) {
+    suspend fun paste(text: String, owner: String = this.owner) {
         resources.clipboard.lock(owner)
         try { withContext(Dispatchers.IO) { check(checkNotNull(screen).service.paste(displayId, text)) { "虚拟屏输入失败" } } }
         finally { resources.clipboard.unlock(owner) }
     }
-    suspend fun observePackage(name: String) { if (name.isNotEmpty() && name != "null") resources.app(owner, name) }
+    suspend fun observePackage(name: String, owner: String = this.owner) { if (name.isNotEmpty() && name != "null") resources.app(owner, name) }
     fun release() { close(); resources.release(owner) }
     fun frame(): Bitmap = checkNotNull(screen).frame()
     fun previewFrames() = flow {

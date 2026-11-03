@@ -13,7 +13,7 @@ import kotlinx.coroutines.delay
 import org.json.JSONObject
 import kotlin.math.roundToInt
 
-internal class PhoneSystem(private val context: Context, private val shell: PhoneShell, private val display: PhoneDisplay? = null) {
+internal class PhoneSystem(private val context: Context, private val shell: PhoneShell, private val display: PhoneDisplay? = null, private val owner: String) {
     companion object {
         val tools = setOf("device_status", "volume_set", "brightness_set", "wifi_toggle", "phone_set_alarm", "phone_set_timer", "phone_add_calendar_event", "phone_system_command")
     }
@@ -26,8 +26,8 @@ internal class PhoneSystem(private val context: Context, private val shell: Phon
         .put("automatic", Settings.System.getInt(resolver, Settings.System.SCREEN_BRIGHTNESS_MODE, 0) == Settings.System.SCREEN_BRIGHTNESS_MODE_AUTOMATIC)
     private fun percent(args: JSONObject): Int = args.getInt("percent").also { require(it in 0..100) { "百分比需为 0 到 100" } }
     private suspend fun open(intent: Intent): JSONObject {
-        display?.reserve(intent)
-        kotlinx.coroutines.withTimeout(30000) { display?.launch(intent) ?: context.startActivity(intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
+        display?.reserve(intent, owner)
+        kotlinx.coroutines.withTimeout(30000) { display?.launch(intent, owner) ?: context.startActivity(intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
         return JSONObject().put("ok", true).put("status", "opened").put("verified", false).put("action", intent.action)
             .put("message", "已打开系统处理界面；需读取页面并确认结果")
     }

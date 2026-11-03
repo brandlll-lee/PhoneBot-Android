@@ -70,6 +70,41 @@ function engine(t, entry = "src/main.mjs", baseUrl, savedHome) {
 }
 
 for (const entry of ["src/main.mjs", "dist/engine.mjs"]) {
+  for (const actionError of [false, true]) test(`${entry}: Pi orders an action and observation in one model turn (${actionError ? "dispatch error" : "dispatch success"})`, async (t) => {
+    const fixture = await startFixture({ turns: [
+      { tool_calls: [
+        { index: 0, id: "action", type: "function", function: { name: "swipe", arguments: JSON.stringify({ direction: "left", expect: { textContains: "Page 2" } }) } },
+        { index: 1, id: "observe", type: "function", function: { name: "screenshot", arguments: "{}" } },
+      ] }, { content: "已检查实际画面。" },
+    ] });
+    t.after(fixture.close);
+    const host = engine(t, entry, fixture.baseUrl);
+    await host.next("ready");
+    host.send({ type: "task", taskId: "ordered", session: "conversation", provider: "deepseek", model: "deepseek-flash",
+      screen: "virtual", displayId: 42, prompt: "查看下一页的实际画面" });
+    const action = await host.next("tool", "ordered");
+    assert.equal(action.name, "swipe");
+    assert.deepEqual(action.params.expect, { textContains: "Page 2" });
+    assert.equal(host.seen.some((event) => event.name === "screenshot"), false);
+    host.send({ type: "tool_result", id: action.id, ...(actionError ? { error: "Gesture rejected" } : { result: { executed: true, conditionMet: true } }) });
+    const observation = await host.next("tool", "ordered");
+    assert.equal(observation.name, "screenshot");
+    assert.equal(fixture.evidence().requests, 1);
+    host.send({ type: "tool_result", id: observation.id, result: { snapshot: 2, actualPage: actionError ? 1 : 2 } });
+    assert.equal((await host.next("result", "ordered")).text, "已检查实际画面。");
+    await host.next("idle", "ordered");
+    assert.equal(fixture.evidence().requests, 2);
+    const results = fixture.messages.filter((message) => message.role === "tool");
+    assert.equal(results.length, 2);
+    assert.ok(results[0].tool_call_id.includes("action"));
+    assert.ok(results[1].tool_call_id.includes("observe"));
+    assert.ok(JSON.stringify(results).includes(actionError ? "Gesture rejected" : "conditionMet"));
+    const system = fixture.messages.find((message) => message.role === "system").content;
+    assert.match(system, /display 42 is retained/);
+    assert.match(system, /textContains/);
+    assert.match(system, /sequentially/);
+  });
+
   test(`${entry}: Pi compacts between phone tool turns and records summary usage`, async (t) => {
     let turn = 0;
     const payloads = [];

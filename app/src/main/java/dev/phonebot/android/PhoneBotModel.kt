@@ -202,6 +202,7 @@ class PhoneBotModel(application: Application) : AndroidViewModel(application) {
     }
     fun deleteSession(id: String) {
         if (sessions.find { it.id == id }?.turns?.any { it.status == "running" } == true) return
+        if (engine.state.value.canRun) engine.command(JSONObject().put("type", "phone_close").put("session", id))
         sessions = sessions.filter { it.id != id }
         markdown.keys.removeAll { it.startsWith("$id/") }
         submissions.remove(id)

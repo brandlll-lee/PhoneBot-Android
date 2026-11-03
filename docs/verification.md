@@ -64,9 +64,18 @@ Start the app from its launcher. Open Settings and run self-check. Check chat, d
 
 Use real provider credentials to validate cloud requests. Keep keys out of command output, test reports, and committed files. Report cloud verification separately from local fixture verification.
 
+`WorkflowTest` is opt-in. Run it with `adb -s <serial> shell am instrument -w -r -e class dev.phonebot.android.engine.WorkflowTest -e cloud true dev.phonebot.android.test/androidx.test.runner.AndroidJUnitRunner`. It uses the configured DeepSeek account and a controlled debug page. Two turns check retained display identity, substring conditions and Chinese input. A third explicitly requests ordered read-only calls. It closes its workspace and removes only its own session, images, journals and notifications. Native grouping support and spontaneous model grouping are separate results.
+
 The lifecycle test deliberately kills the engine process. Accessibility runs in that process. On the S21, Android can retain that service in its crashed-service set while its enabled setting remains present. Before another phone-tool run, switch only PhoneBot's accessibility service off and on in system settings. The validation run restored that binding after fault injection. Normal task cancellation aborts Pi and tool work; it does not kill the process. Process ownership and automatic service recovery need a separate lifecycle change.
 
 ## Validation record
+
+Validated on 2026-11-03 for retained Bot workspaces and Pi tool sequencing:
+
+- Runtime: 34 passed through source and bundle. JVM: 9 passed. APK/test builds, lint, runtime hash and 16 KB ZIP alignment passed. Fixture tests verify ordered action/read calls after both dispatch success and error.
+- S21, Android 14, ARM64: 25 local tests passed without skips. They covered both helpers on both screens, conditions, Chinese input, focus, helper reconnection, cancellation, screen-off operation, preview, parallel Bots, resource queues and native Pi/engine recovery. A short preview sample recorded 320 frames, P95 15 ms and 0.62% janky frames; this does not establish sustained performance.
+- A separate real DeepSeek Flash test passed three controlled turns on display 77. It retained the page, read fresh task observations with distinct element IDs, verified Chinese input, and released the display on Bot close. All tool results completed without errors or condition timeouts. The third turn explicitly requested read and screenshot together; Pi executed both in one model turn. The first two turns still used individual calls. This verifies native grouping, not a general latency gain or consistent spontaneous grouping.
+- Tests used isolated sessions and preserved configured accounts. Screen timeout and accessibility settings were restored. A full third-party App task was not rerun.
 
 Validated on 2026-11-03 for action verification and settings:
 

@@ -103,10 +103,10 @@ internal class PhoneActions(private val service: PhoneAccessibilityService, priv
             "app_launch" -> {
                 val name = params.getString("package")
                 require(name.matches(Regex("[a-zA-Z0-9_.]+"))) { "应用包名无效" }
-                target.reserve(service.packageManager.getLaunchIntentForPackage(name) ?: error("找不到可启动的应用"))
+                target.reserve(service.packageManager.getLaunchIntentForPackage(name) ?: error("找不到可启动的应用"), screen.taskId)
             }
-            "app_send_intent", "phone_open_link" -> target.reserve(PhoneIntents.build(name, params))
-            else -> { screen.scan(); target.observePackage(screen.latest.optString("package")) }
+            "app_send_intent", "phone_open_link" -> target.reserve(PhoneIntents.build(name, params), screen.taskId)
+            else -> { screen.scan(); target.observePackage(screen.latest.optString("package"), screen.taskId) }
         }
         val began = SystemClock.elapsedRealtime()
         return withTimeout(minOf(30000, budgetMs)) { perform(name, params, expected) }
@@ -160,11 +160,11 @@ internal class PhoneActions(private val service: PhoneAccessibilityService, priv
                 val target = params.getString("package")
                 require(target.matches(Regex("[a-zA-Z0-9_.]+"))) { "应用包名无效" }
                 val intent = service.packageManager.getLaunchIntentForPackage(target) ?: error("找不到可启动的应用")
-                this.target.launch(intent)
+                this.target.launch(intent, screen.taskId)
             }
             "app_send_intent", "phone_open_link" -> {
                 val intent = PhoneIntents.build(name, params)
-                target.launch(intent)
+                target.launch(intent, screen.taskId)
             }
             "tap" -> {
                 val node = if (params.has("element") || params.has("text") || params.has("resourceId")) screen.resolve(params) else null
@@ -209,7 +209,7 @@ internal class PhoneActions(private val service: PhoneAccessibilityService, priv
                         putInt(AccessibilityNodeInfo.ACTION_ARGUMENT_SELECTION_START_INT, 0)
                         putInt(AccessibilityNodeInfo.ACTION_ARGUMENT_SELECTION_END_INT, node.text.length)
                     })) { "输入框拒绝选择文字" }
-                    target.paste(text)
+                    target.paste(text, screen.taskId)
                 } else if (!accepted && Build.VERSION.SDK_INT >= 33) {
                     check(node.isFocused || node.performAction(AccessibilityNodeInfo.ACTION_FOCUS)) { "无法聚焦输入框" }
                     val connection = service.inputMethod?.currentInputConnection ?: error("此输入框不支持文字输入")

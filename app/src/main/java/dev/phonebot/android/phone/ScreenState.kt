@@ -37,9 +37,9 @@ internal data class ScreenGeometry(val width: Int, val height: Int, val rotation
 }
 
 internal class ScreenState(private val service: AccessibilityService) {
+    companion object { private val issued = java.util.concurrent.atomic.AtomicLong() }
     var displayId = Display.DEFAULT_DISPLAY
     private data class Entry(val id: String, val node: AccessibilityNodeInfo, val key: String, val unique: String?, val value: JSONObject)
-    private var issued = 0L
     private var sequence = 0L
     private var scope = ""
     private var entries = emptyList<Entry>()
@@ -86,7 +86,7 @@ internal class ScreenState(private val service: AccessibilityService) {
             val matches = old[key].orEmpty().filter { it.id !in used }
             val exact = matches.filter { if (unique != null) it.unique == unique else it.node == node }
             val previous = exact.singleOrNull() ?: matches.singleOrNull()?.takeIf { identities[key] == 1 }
-            val id = previous?.id ?: "e${++issued}"
+            val id = previous?.id ?: "e${issued.incrementAndGet()}"
             used += id
             val bounds = Rect().also(node::getBoundsInScreen)
             val value = JSONObject().put("id", id).put("resourceId", node.viewIdResourceName.orEmpty()).put("text", text).put("description", description)

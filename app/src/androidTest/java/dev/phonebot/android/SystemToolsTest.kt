@@ -50,7 +50,7 @@ class SystemToolsTest {
     @Test fun nativeSettingsReadBackAndCommandsReportActualResults() = runBlocking {
         val audio = context.getSystemService(AudioManager::class.java)
         val previous = audio.getStreamVolume(AudioManager.STREAM_MUSIC)
-        val system = PhoneSystem(context, PhoneShell(context))
+        val system = PhoneSystem(context, PhoneShell(context), owner = "system-test")
         try {
             val status = system.execute("device_status", JSONObject())
             assertEquals(previous, status.getJSONObject("volume").getInt("value"))
@@ -83,7 +83,7 @@ class SystemToolsTest {
     }
 
     @Test fun systemSettingsRespectAuthorizationAndReadBackChanges() = runBlocking {
-        val system = PhoneSystem(context, PhoneShell(context))
+        val system = PhoneSystem(context, PhoneShell(context), owner = "system-test")
         val resolver = context.contentResolver
         if (Settings.System.canWrite(context)) {
             val value = Settings.System.getInt(resolver, Settings.System.SCREEN_BRIGHTNESS)
@@ -124,7 +124,7 @@ class SystemToolsTest {
         val editor = object : ContextWrapper(context) {
             override fun startActivity(intent: Intent) { launched = intent }
         }
-        val system = PhoneSystem(editor, PhoneShell(context))
+        val system = PhoneSystem(editor, PhoneShell(context), owner = "system-test")
         val alarm = system.execute("phone_set_alarm", JSONObject().put("hour", 8).put("minute", 30).put("label", "起床"))
         assertFalse(alarm.getBoolean("verified"))
         assertEquals(android.provider.AlarmClock.ACTION_SET_ALARM, launched.action)
