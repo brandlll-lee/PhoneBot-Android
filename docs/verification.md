@@ -64,11 +64,20 @@ Start the app from its launcher. Open Settings and run self-check. Check chat, d
 
 Use real provider credentials to validate cloud requests. Keep keys out of command output, test reports, and committed files. Report cloud verification separately from local fixture verification.
 
-`WorkflowTest` is opt-in. Run it with `adb -s <serial> shell am instrument -w -r -e class dev.phonebot.android.engine.WorkflowTest -e cloud true dev.phonebot.android.test/androidx.test.runner.AndroidJUnitRunner`. It uses the configured DeepSeek account and a controlled debug page. Two turns check retained display identity, substring conditions and Chinese input. A third explicitly requests ordered read-only calls. It closes its workspace and removes only its own session, images, journals and notifications. Native grouping support and spontaneous model grouping are separate results.
+`WorkflowTest` is opt-in. Run it with `adb -s <serial> shell am instrument -w -r -e class dev.phonebot.android.engine.WorkflowTest -e cloud true dev.phonebot.android.test/androidx.test.runner.AndroidJUnitRunner`. It uses the configured DeepSeek account and a controlled debug page. Two turns check retained display identity, idle sleep and recovery, substring conditions and Chinese input. A third explicitly requests ordered read-only calls. It closes its workspace and removes only its own session, images, journals and notifications. Native grouping support and spontaneous model grouping are separate results.
+
+`PhoneDisplayTest#builtinIdleScreenResumes` and `shizukuIdleScreenResumes` release the task's display wake lock, wait for the actual power controller to turn off, then restore the same display. They check retained text, OCR, preview and touch. Tests restore the device's screen timeout. Disabling display wake acquisition must fail the recovery assertion.
 
 The lifecycle test deliberately kills the engine process. Accessibility runs in that process. On the S21, Android can retain that service in its crashed-service set while its enabled setting remains present. Before another phone-tool run, switch only PhoneBot's accessibility service off and on in system settings. The validation run restored that binding after fault injection. Normal task cancellation aborts Pi and tool work; it does not kill the process. Process ownership and automatic service recovery need a separate lifecycle change.
 
 ## Validation record
+
+Validated on 2026-11-04 for virtual-display power recovery:
+
+- Runtime: 34 passed. JVM: 9 passed. APK/test builds, lint, runtime hash and 16 KB ZIP alignment passed.
+- S21, Android 14: 14 distinct local tests passed without skips. They covered both helpers, both screens, idle recovery, screen-off input and OCR, preview, helper reconnection, cancelled creation and parallel Bots. Disabling display wake acquisition failed the same recovery test; restoring it passed for both helpers.
+- Real DeepSeek Flash completed three controlled turns on display 121. The first task released its wake lock and the display actually slept. Continuation restored the same page and verified Chinese input and screenshots. Closing the Bot released its display. The initial cloud run timed out because the model used a replaced element ID in its condition. The controlled test now specifies the condition explicitly; production tool rules remain unchanged.
+- A short preview sample recorded 322 frames, P95 15 ms and 1.55% janky frames. This is not a sustained performance result. Tests preserved accounts and restored screen timeout and accessibility settings. Full XHS tasks and prolonged Doze were not rerun.
 
 Validated on 2026-11-03 for retained Bot workspaces and Pi tool sequencing:
 

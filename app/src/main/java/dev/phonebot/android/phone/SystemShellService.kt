@@ -13,6 +13,9 @@ import android.os.Binder
 import android.os.Handler
 import android.os.Looper
 import android.os.Process
+import android.os.PowerManager
+import android.os.IBinder
+import android.os.ResultReceiver
 import android.os.SystemClock
 import android.view.Display
 import android.view.InputDevice
@@ -31,32 +34,65 @@ import kotlin.system.exitProcess
 class SystemShellService(private val allowedUid: Int? = null) : ISystemShell.Stub() {
     private val processes = java.util.concurrent.ConcurrentHashMap<String, java.lang.Process>()
     private val generation = AtomicLong()
-    private val displays = mutableMapOf<Int, VirtualDisplay>()
+    private class Screen(val display: VirtualDisplay, val wake: PowerManager.WakeLock)
+    private val displays = mutableMapOf<Int, Screen>()
     private val context by lazy { ShellContext.create() }
     private val manager by lazy { DisplayManager::class.java.getDeclaredConstructor(Context::class.java).apply { isAccessible = true }.newInstance(context) }
     private val taskManager by lazy { Class.forName("android.app.ActivityTaskManager").getMethod("getService").invoke(null)!! }
+    private val power by lazy {
+        val registry = Class.forName("android.os.ServiceManager")
+        fun service(name: String, type: String) = Class.forName("android.os.$type\$Stub").getMethod("asInterface", IBinder::class.java)
+            .invoke(null, registry.getMethod("getService", String::class.java).invoke(null, name))
+        PowerManager::class.java.getConstructor(Context::class.java, Class.forName("android.os.IPowerManager"),
+            Class.forName("android.os.IThermalService"), Handler::class.java).newInstance(context,
+            service("power", "IPowerManager"), service("thermalservice", "IThermalService"), Handler(Looper.getMainLooper()))
+    }
 
     private fun authorize() { check(allowedUid == null || Binder.getCallingUid() == allowedUid || Binder.getCallingPid() == Process.myPid()) { "助手调用方无效" } }
     private fun owned(id: Int) { authorize(); check(synchronized(displays) { id in displays }) { "虚拟屏已释放" } }
     override fun identity(): IntArray { authorize(); return intArrayOf(Process.myUid(), Process.myPid()) }
 
     @SuppressLint("WrongConstant")
-    override fun createDisplay(surface: Surface, width: Int, height: Int, dpi: Int): Int {
+    override fun createDisplay(surface: Surface, width: Int, height: Int, dpi: Int, status: ResultReceiver): Int {
         authorize()
         require(android.os.Build.VERSION.SDK_INT >= 34 && width in 1..4096 && height in 1..4096 && dpi in 72..1000)
         // Trusted displays need their own focus and IME to keep input on the agent screen.
         val flags = 1 or 8 or 64 or 128 or 256 or 1024 or 2048 or 4096 or 8192 or 16384 or 65536
-        val display = manager.createVirtualDisplay("PhoneBot", width, height, dpi, surface, flags)
+        val display = manager.createVirtualDisplay("PhoneBot", width, height, dpi, surface, flags, object : VirtualDisplay.Callback() {
+            override fun onPaused() = status.send(Display.STATE_OFF, null)
+            override fun onResumed() = status.send(Display.STATE_ON, null)
+            override fun onStopped() = status.send(Display.STATE_UNKNOWN, null)
+        }, Handler(Looper.getMainLooper()))
         val id = display.display.displayId
-        synchronized(displays) { displays[id] = display }
         try {
+            // The platform's display-bound lock wakes only the target display group.
+            @Suppress("DEPRECATION")
+            val wake = PowerManager::class.java.getMethod("newWakeLock", Int::class.java, String::class.java, Int::class.java)
+                .invoke(power, PowerManager.SCREEN_BRIGHT_WAKE_LOCK or PowerManager.ACQUIRE_CAUSES_WAKEUP, "PhoneBot:display", id) as PowerManager.WakeLock
+            wake.setReferenceCounted(false)
+            synchronized(displays) { displays[id] = Screen(display, wake) }
             val wm = Class.forName("android.view.WindowManagerGlobal").getMethod("getWindowManagerService").invoke(null)!!
             wm.javaClass.getMethod("setDisplayImePolicy", Int::class.java, Int::class.java).invoke(wm, id, 0)
-        } catch (error: Exception) { releaseDisplay(id); throw error }
+        } catch (error: Exception) { releaseDisplay(id); display.release(); throw error }
         return id
     }
 
-    override fun releaseDisplay(displayId: Int) { authorize(); synchronized(displays) { displays.remove(displayId) }?.release() }
+    @SuppressLint("Wakelock") // Task completion releases the lock through this Binder method.
+    override fun setDisplayActive(displayId: Int, active: Boolean) {
+        authorize()
+        synchronized(displays) {
+            val screen = checkNotNull(displays[displayId]) { "虚拟屏已释放" }
+            if (active) screen.wake.acquire(30 * 60 * 1000L)
+            else if (screen.wake.isHeld) screen.wake.release()
+        }
+    }
+
+    override fun releaseDisplay(displayId: Int) {
+        authorize()
+        synchronized(displays) { displays.remove(displayId) }?.let {
+            try { if (it.wake.isHeld) it.wake.release() } finally { it.display.release() }
+        }
+    }
 
     private fun taskRows(): List<ActivityManager.RunningTaskInfo> {
         val method = taskManager.javaClass.methods.first { it.name == "getTasks" && it.parameterTypes.size == 4 }
@@ -95,7 +131,7 @@ class SystemShellService(private val allowedUid: Int? = null) : ISystemShell.Stu
 
     override fun touch(displayId: Int, x: Float, y: Float, endX: Float, endY: Float, duration: Long): Boolean {
         owned(displayId)
-        val size = android.graphics.Point().also { synchronized(displays) { displays.getValue(displayId) }.display.getRealSize(it) }
+        val size = android.graphics.Point().also { synchronized(displays) { displays.getValue(displayId) }.display.display.getRealSize(it) }
         require(listOf(x, endX).all { it.isFinite() && it >= 0 && it < size.x } && listOf(y, endY).all { it.isFinite() && it >= 0 && it < size.y } && duration in 1..2000)
         val token = generation.get()
         val start = SystemClock.uptimeMillis()
@@ -172,5 +208,5 @@ class SystemShellService(private val allowedUid: Int? = null) : ISystemShell.Stu
         } finally { child.destroy(); processes.remove(requestId, child) }
     }
     override fun cancel(requestId: String) { authorize(); processes[requestId]?.destroyForcibly() }
-    override fun destroy() { authorize(); generation.incrementAndGet(); processes.values.forEach { it.destroyForcibly() }; synchronized(displays) { displays.values.forEach { it.release() }; displays.clear() }; exitProcess(0) }
+    override fun destroy() { authorize(); generation.incrementAndGet(); processes.values.forEach { it.destroyForcibly() }; synchronized(displays) { displays.keys.toList().forEach(::releaseDisplay) }; exitProcess(0) }
 }

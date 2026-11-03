@@ -73,7 +73,7 @@ class PhoneAccessibilityService : AccessibilityService() {
         super.onDestroy()
     }
 
-    internal fun available(target: PhoneDisplay): Boolean = if (target.virtual) target.alive() else
+    internal fun available(target: PhoneDisplay): Boolean = if (target.virtual) target.ready() else
         !getSystemService(KeyguardManager::class.java).isKeyguardLocked && getSystemService(PowerManager::class.java).isInteractive
 
     internal suspend fun gesture(path: Path, duration: Long) {

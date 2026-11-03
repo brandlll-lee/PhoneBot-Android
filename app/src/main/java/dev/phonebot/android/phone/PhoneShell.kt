@@ -25,7 +25,7 @@ internal class PhoneShell(private val context: Context, private val onChange: ()
     private var shizukuService: ISystemShell? = null
     private var shizukuConnection: ServiceConnection? = null
     private val args = Shizuku.UserServiceArgs(ComponentName(context.packageName, SystemShellService::class.java.name))
-        .daemon(false).processNameSuffix("shell").version(3)
+        .daemon(false).processNameSuffix("shell").version(4)
     private val received = Shizuku.OnBinderReceivedListener { onChange() }
     private val died = Shizuku.OnBinderDeadListener { shizukuService = null; onChange() }
     private val granted = Shizuku.OnRequestPermissionResultListener { _, _ -> onChange() }

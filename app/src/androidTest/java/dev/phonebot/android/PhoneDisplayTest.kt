@@ -179,6 +179,39 @@ class PhoneDisplayTest {
     @Test fun builtinMain() = exercise("builtin", "main")
     @Test fun builtinVirtual() = exercise("builtin", "virtual")
 
+    private fun idleScreenResumes(helper: String) = withPhone {
+        assertTrue("$helper is not connected", ready(helper))
+        val timeout = shell("settings get system screen_off_timeout").trim()
+        try {
+            shell("settings put system screen_off_timeout 3000")
+            val id = target(helper, "virtual").getInt("displayId")
+            call("test_launch")
+            call("input_text", JSONObject().put("resourceId", "android:id/edit").put("text", "保留工作页面"))
+            image(id)
+            call("test_rest")
+            fun powerState() = shell("dumpsys display").substringAfter("Display Power Controller:\n  mDisplayId=$id\n")
+                .substringBefore("Display Power Controller:")
+            val deadline = SystemClock.uptimeMillis() + 15000
+            while (!powerState().contains("mScreenState=OFF") && SystemClock.uptimeMillis() < deadline) SystemClock.sleep(250)
+            assertTrue("Idle display did not sleep", powerState().contains("mScreenState=OFF"))
+            assertFalse("Paused display remained ready", call("test_rest").getBoolean("ready"))
+            shell("input keyevent 224")
+            assertEquals("Recovery recreated the workspace", id, target(helper, "virtual").getInt("displayId"))
+            assertTrue("Display did not wake", powerState().contains("mScreenState=ON"))
+            assertTrue(screen(id).getJSONArray("elements").objects().any { it.optString("text") == "保留工作页面" })
+            image(id)
+            val preview = call("test_preview")
+            assertTrue(preview.toString(), preview.getInt("width") > 0 && preview.getInt("height") > 0)
+            val clicked = call("tap", JSONObject().put("text", "确认点击").put("expect", JSONObject().put("text", "点击成功")))
+            assertTrue(clicked.toString(), clicked.getBoolean("conditionMet"))
+        } finally {
+            shell(if (timeout == "null") "settings delete system screen_off_timeout" else "settings put system screen_off_timeout $timeout")
+        }
+    }
+
+    @Test fun builtinIdleScreenResumes() = idleScreenResumes("builtin")
+    @Test fun shizukuIdleScreenResumes() = idleScreenResumes("shizuku")
+
     @Test fun conditionsAndInputEvidenceUseTheSelectedDisplay() = withPhone {
         assumeTrue("Built-in helper is not connected", ready("builtin"))
         for (mode in listOf("main", "virtual")) {

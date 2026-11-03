@@ -312,7 +312,9 @@ class EngineService : Service() {
     }
 
     private fun updateWakeLock() {
-        if (runs.values.any { it.start != null && it.display.virtual && !it.ended && !it.cancelled && it.pausedTool == null }) {
+        val active = runs.values.filter { it.start != null && it.display.virtual && !it.ended && !it.cancelled && it.pausedTool == null }
+        displays.values.filter { display -> active.none { it.display === display } }.forEach { it.rest() }
+        if (active.isNotEmpty()) {
             if (!wakeLock.isHeld) wakeLock.acquire(30 * 60 * 1000L)
         } else releaseWakeLock()
     }
@@ -341,7 +343,7 @@ class EngineService : Service() {
                     try { withTimeout(20000) { run.display.prepare() } }
                     catch (error: Exception) {
                         if (error is CancellationException) throw error
-                        pause(run, event, run.display.helper, error.message ?: "执行屏幕不可用")
+                        pause(run, event, if (run.display.alive()) "screen" else run.display.helper, error.message ?: "执行屏幕不可用")
                         helperStates()
                         return@launch
                     }

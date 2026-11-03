@@ -37,6 +37,7 @@ class WorkflowTest {
         }
         val services = shell("settings get secure enabled_accessibility_services").takeUnless { it == "null" }.orEmpty()
         val enabled = shell("settings get secure accessibility_enabled")
+        val screenTimeout = shell("settings get system screen_off_timeout")
         val component = "${context.packageName}/.phone.PhoneAccessibilityService"
         val others = services.split(':').filter { it.isNotEmpty() && ComponentName.unflattenFromString(it) != ComponentName.unflattenFromString(component) }.joinToString(":")
         val provider = arguments.getString("provider", "deepseek")
@@ -102,11 +103,16 @@ class WorkflowTest {
             assertTrue("Helper ready", helperReady)
             shell("input keyevent 3")
             SystemClock.sleep(1000)
-            val first = task("在独立屏幕打开测试页：Android action 为 dev.phonebot.android.TEST，package 为 ${context.packageName}，extras 的 conditionFixture 为 true。点击‘下一张’，核对当前为第2张，再截图给我。保留页面，后续继续。")
+            val first = task("在独立屏幕打开测试页：Android action 为 dev.phonebot.android.TEST，package 为 ${context.packageName}，extras 的 conditionFixture 为 true。点击‘下一张’，用 expect.textContains=‘第2张’核对结果，再截图给我。保留页面，后续继续。")
             val display = first.first { it.optString("type") == "phone_target" }.getInt("displayId")
             val manager = context.getSystemService(DisplayManager::class.java)
             assertTrue(display > 0)
             assertNotNull("Completed task retains its workspace", manager.getDisplay(display))
+            shell("settings put system screen_off_timeout 3000")
+            waitUntil("Idle workspace sleeps after task completion") {
+                shell("dumpsys display").substringAfter("Display Power Controller:\n  mDisplayId=$display\n")
+                    .substringBefore("Display Power Controller:").contains("mScreenState=OFF")
+            }
             val marker = "继续工作${SystemClock.uptimeMillis()}"
             val second = task("继续使用刚才的页面。不要重新打开。先读取当前页面，再在‘中文输入框’填写‘$marker’，核对仍然显示第2张，再截图给我。")
             assertTrue(second.any { it.optString("type") == "phone_target" })
@@ -145,6 +151,7 @@ class WorkflowTest {
             instrumentation.runOnMainSync { scope.cancel(); engine.detach(); activity.finish() }
             shell(if (services.isEmpty()) "settings delete secure enabled_accessibility_services" else "settings put secure enabled_accessibility_services $services")
             shell(if (enabled == "null") "settings delete secure accessibility_enabled" else "settings put secure accessibility_enabled $enabled")
+            shell(if (screenTimeout == "null") "settings delete system screen_off_timeout" else "settings put system screen_off_timeout $screenTimeout")
             File(context.filesDir, "sessions/$bot.jsonl").delete()
             File(context.filesDir, "images/$bot").deleteRecursively()
             tasks.forEach {

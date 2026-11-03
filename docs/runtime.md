@@ -88,7 +88,7 @@ Chat saves capture an immutable list after the existing debounce. JSON encoding 
 
 The display's Binder death handler closes its ImageReader and frame thread. Cancellation during creation closes the new display before returning. Element IDs use one atomic counter in the engine process. New task observations cannot alias IDs from earlier tasks in that process. ML Kit initializes once in the engine application's startup. Accessibility reconnection creates recognizers as needed and closes them on service destruction.
 
-Main-screen tools need an unlocked, interactive phone. Virtual-screen tools check the target display and helper instead. A virtual task holds a bounded partial CPU wake lock. Permission pauses, cancellation and terminal events release it. This lock does not keep the physical panel on. It does not exempt the app from Doze or vendor network restrictions.
+Main-screen tools need an unlocked, interactive phone. Virtual-screen tools check the target display and helper instead. The helper uses Android's display-bound screen wake lock to restore and hold the target display group. This framework API runs under shell permission. `VirtualDisplay.Callback` reports pause, resume and stop separately from Binder liveness. Pausing discards the cached frame. Capture waits up to five seconds for an available frame. The engine pauses a tool if the display cannot resume. A virtual task also holds a bounded partial CPU wake lock. Permission pauses, cancellation and terminal events release both locks while retaining the workspace. Neither lock keeps the physical panel on or exempts the app from Doze or vendor network restrictions.
 
 ### Built-in ADB
 
@@ -192,6 +192,8 @@ Pi 1.4.0's [Agent initialization](https://github.com/earendil-works/pi/blob/v1.4
 - [ADB Wi-Fi protocol](https://android.googlesource.com/platform/packages/modules/adb/+/refs/heads/main/docs/dev/adb_wifi.md): pairing, TLS identity, discovery and separate ports.
 - [Android TLS exporter](https://developer.android.com/reference/android/net/ssl/SSLSockets): platform keying-material export from API 31.
 - [Multi-display launch](https://source.android.com/docs/core/display/multi_display/activity-launch): launch options and task placement.
+- [Virtual display callbacks](https://developer.android.com/reference/android/hardware/display/VirtualDisplay.Callback): paused surfaces stop receiving buffers.
+- [Android 14 PowerManager](https://android.googlesource.com/platform/frameworks/base/+/refs/heads/android14-release/core/java/android/os/PowerManager.java): display-bound wake locks in the privileged helper.
 - [Local network permission](https://developer.android.com/privacy-and-security/local-network-permission): Android 17 runtime authorization.
 - [Doze and App Standby](https://developer.android.com/training/monitoring-device-state/doze-standby): power and network limits after screen-off.
 - [Compose text input](https://developer.android.com/develop/ui/compose/text/user-input): text field line limits, IME actions, and input behavior.
