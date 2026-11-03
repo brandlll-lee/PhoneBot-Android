@@ -22,6 +22,7 @@ import android.view.WindowManager
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.filters.SdkSuppress
 import androidx.test.platform.app.InstrumentationRegistry
+import androidx.core.widget.doAfterTextChanged
 import java.io.File
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
@@ -177,6 +178,62 @@ class PhoneDisplayTest {
     @Test fun shizukuVirtual() = exercise("shizuku", "virtual")
     @Test fun builtinMain() = exercise("builtin", "main")
     @Test fun builtinVirtual() = exercise("builtin", "virtual")
+
+    @Test fun conditionsAndInputEvidenceUseTheSelectedDisplay() = withPhone {
+        assumeTrue("Built-in helper is not connected", ready("builtin"))
+        for (mode in listOf("main", "virtual")) {
+            target("builtin", mode)
+            call("test_launch", JSONObject().put("conditionFixture", true))
+            val expect = JSONObject().put("textContains", "第2张").put("resourceId", "android:id/text1").put("withinResourceId", "android:id/list")
+            val changed = call("tap", JSONObject().put("text", "下一张").put("expect", expect))
+            assertTrue(changed.toString(), changed.getBoolean("conditionMet"))
+            assertTrue(changed.toString(), changed.getLong("waitMs") < 2000)
+            for (condition in listOf(JSONObject().put("text", "第2张"),
+                JSONObject().put("textContains", "第2张").put("resourceId", "android:id/edit"),
+                JSONObject().put("textContains", "第2张").put("selected", true))) {
+                val result = call("tap", JSONObject().put("text", "下一张").put("expect", condition).put("timeoutMs", 250))
+                assertFalse(result.toString(), result.getBoolean("conditionMet"))
+            }
+            val exact = call("tap", JSONObject().put("text", "下一张").put("expect", JSONObject().put("text", "图片,第2张,共3张")))
+            assertTrue(exact.toString(), exact.getBoolean("conditionMet"))
+            for ((inputMode, expectedValue) in listOf("" to true, "decorated" to null, "retained" to null, "spacing" to null,
+                "truncated" to false, "hint" to false, "replaced" to null)) {
+                call("test_launch", JSONObject().put("inputMode", inputMode))
+                instrumentation.runOnMainSync {
+                    val activity = androidx.test.runner.lifecycle.ActivityLifecycleMonitorRegistry.getInstance()
+                        .getActivitiesInStage(androidx.test.runner.lifecycle.Stage.RESUMED)
+                        .single { it.componentName.className == "dev.phonebot.android.testing.PhoneTestActivity" }
+                    assertEquals("$mode fixture", inputMode, activity.intent.getStringExtra("inputMode"))
+                    assertEquals("$mode fixture input", "", activity.findViewById<android.widget.EditText>(android.R.id.edit).text.toString())
+                    if (inputMode == "spacing") activity.findViewById<android.widget.EditText>(android.R.id.edit).doAfterTextChanged {
+                        if (it?.contains(' ') == true) it.replace(0, it.length, it.toString().replace(" ", ""))
+                    }
+                }
+                val requested = "粤语 歌单"
+                val result = call("do_steps", JSONObject().put("steps", org.json.JSONArray()
+                    .put(JSONObject().put("tool", "input_text").put("args", JSONObject().put("resourceId", "android:id/edit").put("text", requested)))
+                    .put(JSONObject().put("tool", "tap").put("args", JSONObject().put("text", "确认点击")))))
+                val input = result.getJSONArray("steps").getJSONObject(0)
+                assertTrue(input.toString(), input.getBoolean("executed"))
+                assertTrue(result.toString(), result.getBoolean("ok"))
+                assertEquals("$mode/$inputMode: $input", expectedValue, input.opt("inputVerified").takeUnless { it == JSONObject.NULL })
+                assertEquals(result.toString(), if (expectedValue == true) 0 else 1, result.getInt("remaining"))
+                if (inputMode == "decorated") assertEquals("搜索, $requested", input.getString("actualText"))
+                if (inputMode == "retained") assertEquals("旧内容$requested", input.getString("actualText"))
+                if (inputMode == "spacing") assertEquals("粤语歌单", input.getString("actualText"))
+                if (inputMode == "hint") {
+                    assertEquals("", input.getString("actualText"))
+                    assertTrue(input.getBoolean("showingHintText"))
+                }
+                if (expectedValue != true) assertEquals(if (expectedValue == false) "input_mismatch" else "input_unknown", input.getString("stopReason"))
+            }
+            call("test_launch")
+            val hintValue = call("input_text", JSONObject().put("resourceId", "android:id/edit").put("text", "输入文字"))
+            assertTrue(hintValue.toString(), hintValue.getBoolean("inputVerified"))
+            assertFalse(hintValue.getBoolean("showingHintText"))
+            call("home")
+        }
+    }
 
     @Test fun virtualPasteReplacesChineseText() = withPhone {
         assumeTrue("Shizuku is not connected", ready("shizuku"))

@@ -93,6 +93,7 @@ internal class ScreenState(private val service: AccessibilityService) {
                 .put("bounds", bounds.json()).put("clickable", node.isClickable).put("editable", node.isEditable).put("enabled", node.isEnabled)
                 .put("focused", node.isFocused).put("selected", node.isSelected).put("scrollable", node.isScrollable)
                 .put("checkable", node.isCheckable).put("checked", node.isChecked).put("class", node.className?.toString())
+            if (node.isEditable && !node.isPassword) value.put("hintText", node.hintText?.toString().orEmpty()).put("showingHintText", node.isShowingHintText)
             Entry(id, node, key, unique, value)
         }
         entries.forEachIndexed { index, entry -> entry.value.put("parent", collected[index].third?.let { entries[it].id } ?: JSONObject.NULL) }
@@ -137,13 +138,14 @@ internal class ScreenState(private val service: AccessibilityService) {
     fun condition(expected: JSONObject): Boolean {
         if (!latest.optBoolean("treeReadable")) return false
         if (expected.has("package") && latest.optString("package") != expected.getString("package")) return false
-        val selectors = listOf("element", "text", "resourceId", "editable", "enabled", "selected", "checked", "withinResourceId")
+        val selectors = listOf("element", "text", "textContains", "resourceId", "editable", "enabled", "selected", "checked", "withinResourceId")
         if (selectors.none(expected::has)) return !expected.optBoolean("absent")
         val found = entries.any { entry ->
             val node = entry.node
             !node.isPassword && node.isVisibleToUser &&
                 (!expected.has("element") || entry.id == expected.getString("element")) &&
                 (!expected.has("text") || (node.text?.toString() == expected.getString("text") || node.contentDescription?.toString() == expected.getString("text")) && node.isEditable == expected.optBoolean("editable")) &&
+                (!expected.has("textContains") || (node.text?.contains(expected.getString("textContains")) == true || node.contentDescription?.contains(expected.getString("textContains")) == true) && node.isEditable == expected.optBoolean("editable")) &&
                 (!expected.has("resourceId") || node.viewIdResourceName == expected.getString("resourceId")) &&
                 (!expected.has("editable") || node.isEditable == expected.getBoolean("editable")) &&
                 (!expected.has("enabled") || node.isEnabled == expected.getBoolean("enabled")) &&

@@ -49,7 +49,7 @@ Download the APK to your phone. Open it in your file manager. Allow that file ma
 
 ### 2. Connect a model
 
-Open **··· → 设置 → 模型服务** (Settings → Model services). Choose a provider and sign in or enter an API key. Tap the top avatar, choose a model in **Bot 设置** (Bot settings), then press **验证连接** (Verify connection). Change the theme under **设置 → 外观** (Settings → Appearance).
+Open **··· → 设置 → 模型账号** (Settings → Model accounts). Choose a provider and sign in or enter an API key. Tap the top avatar, choose a model in **Bot 设置** (Bot settings), then press **验证连接** (Verify connection). Change the theme under **设置 → 外观** (Settings → Appearance).
 
 The model must support tool calling. Screenshot input also needs image support. Pi supplies the catalog. Each provider defines its authentication methods. A successful connection check confirms that the selected model and credentials can make a request. It does not establish success for every phone task.
 
@@ -61,13 +61,13 @@ Enable **通知权限** (Notifications) and **任务结果横幅** (Task result 
 
 ### 4. Choose a screen and helper
 
-Tap the avatar/name at the top to open **Bot 设置** (Bot settings). Choose this Bot's model, **主屏幕／虚拟屏幕** (Main screen / Virtual display), and **内置助手／Shizuku** (Built-in helper / Shizuku). Save defaults with **设为新 Bot 默认配置**. Existing Bots keep their choices.
+Tap the avatar/name at the top to open **Bot 设置** (Bot settings). Choose this Bot's model, **工作屏幕** (Phone screen / Independent screen), and **控制方式** (Built-in connection / Shizuku). Save defaults with **设为新 Bot 默认配置**. Existing Bots keep their choices.
 
 Basic main-screen control does not need a helper. Virtual displays need Android 14 or later and a working helper. All Bots share device connections and authorization. A running task keeps its selected helper and screen.
 
 During a task, tap the **PhoneBot** bubble to view the virtual screen. Tap the image to collapse it. Drag the bubble or image to move it. In main-screen mode, the bubble returns to the conversation. Stop the task from the chat. The bubble closes when execution ends.
 
-Open **设置 → 设备助手** (Settings → Device helper):
+Open **设置 → 手机控制** (Settings → Phone control):
 
 - **Built-in helper**: Requires Android 12 or later. Connect to Wi-Fi. Open PhoneBot and Android Wireless debugging in split-screen. Open **Pair device with pairing code**. Keep the dialog open. Enter its port and six-digit code in PhoneBot. PhoneBot saves the pairing identity and finds the connection port for later use. Android 17 also needs local network permission.
 - **Shizuku**: Start Shizuku and authorize PhoneBot.

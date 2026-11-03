@@ -86,8 +86,9 @@ test("Pi can use an archived screenshot directly in its final Markdown answer", 
   assert.equal(fixture.evidence().requests, 2);
 });
 
-test("Pi validates phone arguments before dispatch", async (t) => {
-  const fixture = await startFixture({ tool: "swipe", params: { x: -1 } });
+for (const [tool, params] of [["swipe", { x: -1 }], ["input_text", { element: "搜索", text: "粤语" }]])
+test(`Pi validates ${tool} arguments before dispatch`, async (t) => {
+  const fixture = await startFixture({ tool, params });
   t.after(fixture.close);
   const model = { id: "phone", name: "phone", provider: "fixture", api: "openai-completions", baseUrl: fixture.baseUrl,
     reasoning: false, input: ["text"], contextWindow: 10000, maxTokens: 1000, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 } };
@@ -98,6 +99,28 @@ test("Pi validates phone arguments before dispatch", async (t) => {
   await agent.prompt("滑动");
   assert.equal(calls, 0);
   assert.ok(agent.state.messages.some((m) => m.role === "toolResult" && m.isError));
+});
+
+test("Pi preserves explicit substring conditions and uncertain input evidence", async (t) => {
+  const steps = [{ tool: "input_text", args: { element: "e12", text: "粤语 歌单", expect: { textContains: "歌单", editable: true } } },
+    { tool: "tap", args: { text: "搜索" } }];
+  const fixture = await startFixture({ tool: "do_steps", params: { steps } });
+  t.after(fixture.close);
+  const model = { id: "phone", name: "phone", provider: "fixture", api: "openai-completions", baseUrl: fixture.baseUrl,
+    reasoning: false, input: ["text"], contextWindow: 10000, maxTokens: 1000, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 } };
+  const models = createModels();
+  models.setProvider(createProvider({ id: "fixture", models: [model], auth: { apiKey: { name: "fixture", resolve: async () => ({ auth: { apiKey: "fixture" } }) } }, api: { stream, streamSimple } }));
+  const evidence = { ok: true, canContinue: false, remaining: 1, steps: [{ tool: "input_text", ok: true, executed: true,
+    inputVerified: null, actualText: "搜索, 粤语 歌单", hintText: "搜索", showingHintText: false, stopReason: "input_unknown" }] };
+  let calls = 0;
+  const agent = new Agent({ initialState: { model, tools: phoneTools(async (name, params) => {
+    assert.equal(name, "do_steps"); assert.deepEqual(params, { steps }); calls++; return evidence;
+  }, model) }, streamFn: models.streamSimple.bind(models) });
+  await agent.prompt("搜索粤语歌单");
+  assert.equal(calls, 1);
+  assert.equal(fixture.evidence().requests, 2);
+  assert.deepEqual(JSON.parse(fixture.evidence().toolResult), evidence);
+  assert.equal(agent.state.messages.find((message) => message.role === "toolResult").isError, false);
 });
 
 test("Pi forwards batch dispatch, wait outcomes and screen changes in one tool round trip", async (t) => {

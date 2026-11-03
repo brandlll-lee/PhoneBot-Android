@@ -46,7 +46,9 @@ Use a search field, Bot contacts and a software-settings footer. Each contact ha
 
 ## Settings
 
-Use one fixed-height sheet with a centered title, back navigation, and Close. Disable sheet dragging. Scroll only the body below the header. Group related rows. Put the icon on the left and the current value on the right. Use inset dividers. Software settings contain shared provider authentication, device authorization, appearance and engine controls. Keep credentials out of the conversation. Provider rows use bundled brand marks and a shared fallback. See [asset sources](assets/providers/README.md).
+Use one fixed-height sheet. Place Back and the left-aligned title in its fixed header. Scroll only the body. Disable sheet dragging. Use `PhoneUi` settings typography, 20 dp page insets, 20 dp group corners and rows of at least 64 dp. Put the icon on the left and the current value on the right. Align inset dividers with the title. Functional icons use bundled Lucide vectors. Provider rows keep their brand marks. See [functional icons](assets/icons/README.md) and [provider assets](assets/providers/README.md).
+
+Bot settings select the control method and work screen through anchored native menus. Mark the selected item. Save through the existing Bot configuration. Lock these choices only while that Bot runs. Software settings group Model accounts, Phone control, Appearance, Notifications and About. Engine controls and detailed errors belong under Troubleshooting. Phone control shows only the selected method's required connection steps. A ready connection hides the pairing fields. Keep credentials out of the conversation.
 
 An arrow indicates navigation. It does not control whether a row can be pressed. Action rows follow their enabled state. Status rows have no click action.
 

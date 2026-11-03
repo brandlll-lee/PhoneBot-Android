@@ -16,7 +16,7 @@ The runtime tests must pass for both source and bundled entry points. They use r
 The JVM tests check available controls for each engine phase, ADB framing and checksums, stream closure, pairing packets, SPAKE2 vectors, and HKDF derivation. Lint treats warnings as errors.
 Dependency update advice is disabled because the build uses a pinned, compatible toolchain.
 
-Android tests cover process isolation, a Pi-to-Kotlin round trip, stop, restart, process failure, and recovery. They also cover Pi catalog/authentication, saved model selection, encrypted credential updates/deletion, Chinese input with stable IDs and read-back, ambiguous target rejection, full-screen bottom coordinates, gestures, app navigation, JPEG dimensions/mapping, and Chinese/English OCR. Batch tests check successful execution and early stop for a missing target or dialog. Journal tests cover credential redaction, torn writes, interruption recovery, and terminal states. A real Pi authentication failure must preserve its task journal and transcript.
+Android tests cover process isolation, a Pi-to-Kotlin round trip, stop, restart, process failure, and recovery. They also cover Pi catalog/authentication, saved model selection, isolated credential updates/deletion, Chinese input with stable IDs and read-back, ambiguous target rejection, full-screen bottom coordinates, gestures, app navigation, JPEG dimensions/mapping, and Chinese/English OCR. Batch tests check successful execution and early stop for a missing target or dialog. Journal tests cover credential redaction, torn writes, interruption recovery, and terminal states.
 
 The controlled page delays a result while its tree stays quiet. Both single and batch actions must wait for their result condition. A matching input value must not satisfy a non-editable result condition. Timeout must stop remaining actions while preserving successful dispatch status. A dense page checks more than 100 visible elements, container labels, and parent IDs. A label present before a no-op click must return `condition_unchanged` and stop batch continuation. A delayed selected-state condition must wait for the actual selection. Repeated matches must allow unrelated text to keep changing. Markdown tests cover Chinese streaming, unfinished emphasis, completed history rendering, long code, links, and wide tables. Trace tests check Pi content order, returned thinking, live deltas, journal replay, errors, tool input/output, automatic collapse, and a final reply displayed once outside the trace. Notification tests cover terminal labels, permission checks, deduplication, and exact-task navigation on cold and warm activities. Wait for Android's asynchronous notification publication before inspecting its active list.
 
@@ -26,9 +26,9 @@ Composer tests use an edge-to-edge activity with resize behavior, as the main ac
 
 Bot settings tests use separate storage. They check old-record defaults, independent names/colors/models, saved helper/screen choices, empty Bots and restoration. Composer tests check text growth and keyboard dismissal. The actual-page test checks independent drafts and moves model/screen selection to Bot settings.
 
-`PiSessionTest` runs the packaged engine through the native Node bridge in isolated test storage. A model-stream fixture triggers official compaction. It checks JSON import, persisted summary and tool result, continuation, all 21 tools and clean shutdown. It uses fixture credentials and does not read or change the configured model accounts. Run this class once per instrumentation process because Node permits one embedded instance.
+`PiSessionTest` runs the packaged engine through the native Node bridge in isolated test storage. A model-stream fixture triggers official compaction. It checks login/logout with an in-memory credential store, JSON import, persisted summary and tool result, continuation, all 21 tools and clean shutdown. Run this class once per instrumentation process because Node permits one embedded instance. `EngineIntegrationTest` checks catalog selection with a temporary Bot and waits for its saved state. Authentication tests must use fixture stores.
 
-`ConversationSettingsTest` opens the actual app and Bot settings. It presses both helper choices and both screen choices, checks the values and restores the original Bot configuration. It also checks appearance, contact switching, draft isolation and read-only status rows. It preserves provider credentials and global defaults.
+`ConversationSettingsTest` opens the actual app and Bot settings. It selects both control methods and both work screens through anchored menus, checks saved values and restores the Bot configuration. It covers appearance, navigation, connection-stage projections, pairing-field keyboard access and fixed sheet position. Native frame metrics record layout, draw time and frame deadlines. Projected helper states do not change device pairing. Provider credentials and global defaults remain intact. `PhoneDisplayTest` checks exact and substring conditions plus input read-back on the main and independent displays. Decorated text, retained content and replaced nodes stop dependent batch steps as unknown; hints and length limits report confirmed mismatch.
 
 `ParallelPhoneTest` uses two separate fixture packages on two real virtual displays. It checks simultaneous clipboard-based Chinese input, screen identity, independent release, App queuing and main-screen queuing. A helper skip is not a pass. `PhoneResourcesTest` covers resource transfer and cancelled waiters. `EngineIntegrationTest#parallelProbesKeepTheirOwnEventsAndResults` runs two real Pi probes through the Android engine and checks task-bound events and results. These tests preserve model credentials.
 
@@ -44,7 +44,7 @@ Bot settings tests use separate storage. They check old-record defaults, indepen
 
 `TraceTest` opens 200 tool steps and checks that only nearby rows are composed. It scrolls to the last result and collapses the trace. Its press test waits for native interaction feedback, checks blue text and verifies that the background stays unchanged. `PresentationTest#replyStreamsAndMovesToolTextIntoTheTrace` checks streamed reply text, tool-call transitions, finalization and cancellation through the same event projection used by journal replay.
 
-Run the full suite on a test installation. The authentication test changes provider credentials and the default model. For the user's configured phone, select only the controlled page test:
+Authentication tests use isolated fixture stores. UI tests restore Bot choices and appearance. For a focused phone-tool check, run:
 
 ```powershell
 adb -s DEVICE shell am instrument -w -e class dev.phonebot.android.PhoneToolsTest#accessibilityReadsActsVerifiesChineseAndRecognizesPixels dev.phonebot.android.test/androidx.test.runner.AndroidJUnitRunner
@@ -67,6 +67,15 @@ Use real provider credentials to validate cloud requests. Keep keys out of comma
 The lifecycle test deliberately kills the engine process. Accessibility runs in that process. On the S21, Android can retain that service in its crashed-service set while its enabled setting remains present. Before another phone-tool run, switch only PhoneBot's accessibility service off and on in system settings. The validation run restored that binding after fault injection. Normal task cancellation aborts Pi and tool work; it does not kill the process. Process ownership and automatic service recovery need a separate lifecycle change.
 
 ## Validation record
+
+Validated on 2026-11-03 for action verification and settings:
+
+- Runtime: 30 tests passed. JVM: 9 passed. APK builds, lint, runtime hash, icon notices and 16 KB ZIP alignment passed.
+- Samsung S21, Android 14, ARM64: 72 distinct tests passed across grouped runs. They covered both helpers on both screens, exact/substring conditions, input evidence, batch stops, Pi sessions, independent Bots and settings. Two fixture timing failures passed after correction. Re-pairing was skipped because no fresh pairing code was supplied.
+- Another 12 UI tests passed at 1.3 font scale. Native light/dark screenshots were inspected. Settings stayed fixed during boundary gestures. Font scale and screen timeout were restored.
+- A short debug settings sample recorded 66 frames, P50 7.35 ms, P95 14.99 ms and maximum 91.98 ms; five frames exceeded their reported deadline. These samples do not establish sustained frame rate. Authentication tests now use isolated stores.
+
+This run used local model fixtures and controlled pages. A cloud-backed third-party App task was not rerun.
 
 Validated on 2026-11-03 for inline images, Bot styling and token budgets:
 

@@ -1,6 +1,5 @@
 package dev.phonebot.android.phone
 
-import android.content.Intent
 import android.accessibilityservice.AccessibilityService
 import android.graphics.Path
 import android.graphics.Rect
@@ -21,7 +20,7 @@ import kotlin.coroutines.coroutineContext
 internal class PhoneActions(private val service: PhoneAccessibilityService, private val screen: ScreenState, private val target: PhoneDisplay) {
     private val actions = setOf("app_launch", "app_send_intent", "phone_open_link", "tap", "swipe", "input_text", "back", "home")
 
-    private suspend fun settle(expected: JSONObject?, timeout: Long, packageName: String?, dialogWindow: Int?, before: String, conditionBefore: Boolean): JSONObject {
+    private suspend fun settle(expected: JSONObject?, timeout: Long, packageName: String?, dialogWindow: Int?, before: String, conditionBefore: Boolean, inputStop: String?): JSONObject {
         val began = SystemClock.uptimeMillis()
         var previous = ""
         var repeats = 0
@@ -43,6 +42,7 @@ internal class PhoneActions(private val service: PhoneAccessibilityService, priv
             val reason = when {
                 popup -> "dialog"
                 switched -> "navigation"
+                inputStop != null -> inputStop
                 met && (stable || !conditionBefore && matches >= 2) -> if (conditionBefore && !changed) "condition_unchanged" else "condition_met"
                 expected == null && stable -> "tree_stable"
                 expired -> if (fingerprint.isEmpty()) "tree_unreadable" else "timeout"
@@ -124,8 +124,12 @@ internal class PhoneActions(private val service: PhoneAccessibilityService, priv
         val conditionBefore = target?.let(screen::condition) == true
         val display = this.target.takeIf { it.virtual }
         val tasksBefore = display?.tasks().orEmpty()
-        act(name, params)
-        val result = settle(target, timeout, before.takeIf { name !in setOf("app_launch", "home", "back") }, dialogWindow, fingerprint, conditionBefore).put("inputVerified", name == "input_text")
+        val input = act(name, params)
+        val inputStop = if (input.has("inputVerified") && !input.optBoolean("inputVerified")) {
+            if (input.isNull("inputVerified")) "input_unknown" else "input_mismatch"
+        } else null
+        val result = settle(target, timeout, before.takeIf { name !in setOf("app_launch", "home", "back") }, dialogWindow, fingerprint, conditionBefore, inputStop)
+        input.keys().forEach { result.put(it, input.get(it)) }
         val reason = result.getString("stopReason")
         val changedApp = before != null && screen.latest.optString("package") != before
         if (display != null) {
@@ -139,7 +143,7 @@ internal class PhoneActions(private val service: PhoneAccessibilityService, priv
         }
         return result.put("executed", true).put("ok", true)
             .put("navigation", if (!changedApp) "none" else if (reason == "navigation") "unplanned" else "expected")
-            .put("canContinue", reason == "condition_met" || reason == "tree_stable" && name in setOf("input_text", "home", "back"))
+            .put("canContinue", inputStop == null && (reason == "condition_met" || reason == "tree_stable" && name in setOf("input_text", "home", "back")))
     }
 
     private fun dialog(): Boolean {
@@ -147,7 +151,7 @@ internal class PhoneActions(private val service: PhoneAccessibilityService, priv
         return root.className?.contains("Dialog", true) == true || root.findAccessibilityNodeInfosByViewId("android:id/alertTitle").isNotEmpty()
     }
 
-    private suspend fun act(name: String, params: JSONObject) {
+    private suspend fun act(name: String, params: JSONObject): JSONObject {
         coroutineContext.ensureActive()
         check(service.available(target)) { "执行屏幕不可用，请检查连接和锁屏状态" }
         require(name in actions) { "工具不存在" }
@@ -213,13 +217,23 @@ internal class PhoneActions(private val service: PhoneAccessibilityService, priv
                     connection.commitText(text, 1, TextAttribute.Builder().build())
                 } else check(accepted) { "输入框拒绝写入文字" }
                 val deadline = SystemClock.uptimeMillis() + 1500
-                while (SystemClock.uptimeMillis() < deadline) { if (node.refresh() && node.text?.toString() == text) break; delay(80) }
-                check(node.refresh() && node.text?.toString() == text) { "输入回读不一致。请检查页面。" }
+                while (SystemClock.uptimeMillis() < deadline) { if (!node.refresh() || !node.isShowingHintText && node.text?.toString() == text) break; delay(80) }
+                val readable = node.refresh() && node.isVisibleToUser && node.isEditable && !node.isPassword
+                val actual = if (!readable) null else if (node.isShowingHintText) "" else node.text?.toString()
+                val verified = when {
+                    actual == text -> true
+                    readable && (node.isShowingHintText || node.maxTextLength >= 0 && text.length > node.maxTextLength) -> false
+                    else -> null
+                }
+                return JSONObject().put("inputVerified", verified ?: JSONObject.NULL).put("actualText", actual ?: JSONObject.NULL)
+                    .put("hintText", if (readable) node.hintText?.toString().orEmpty() else JSONObject.NULL)
+                    .put("showingHintText", if (readable) node.isShowingHintText else JSONObject.NULL)
             }
             "back" -> if (target.virtual) target.key(KeyEvent.KEYCODE_BACK)
                 else check(service.performGlobalAction(AccessibilityService.GLOBAL_ACTION_BACK)) { "系统拒绝返回操作" }
             "home" -> if (target.virtual) target.key(KeyEvent.KEYCODE_HOME)
                 else check(service.performGlobalAction(AccessibilityService.GLOBAL_ACTION_HOME)) { "系统拒绝主页操作" }
         }
+        return JSONObject()
     }
 }

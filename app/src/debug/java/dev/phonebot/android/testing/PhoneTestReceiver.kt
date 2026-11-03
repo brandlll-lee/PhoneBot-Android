@@ -80,7 +80,8 @@ class PhoneTestReceiver : BroadcastReceiver() {
                         val activity = params.optString("activity")
                         val launch = if (activity.isNotEmpty()) Intent().setComponent(android.content.ComponentName(params.getString("package"), activity))
                             else Intent(context, PhoneTestActivity::class.java)
-                        target.launch(launch.putExtra("pasteInput", params.optBoolean("pasteInput")))
+                        target.launch(launch.addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP).putExtra("pasteInput", params.optBoolean("pasteInput"))
+                            .putExtra("inputMode", params.optString("inputMode")).putExtra("conditionFixture", params.optBoolean("conditionFixture")))
                         delay(700)
                         return@withTimeout execution.execute("screen_read", JSONObject())
                     }

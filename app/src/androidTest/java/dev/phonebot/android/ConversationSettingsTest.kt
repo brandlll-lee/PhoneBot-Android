@@ -19,6 +19,13 @@ class ConversationSettingsTest {
     @get:Rule val compose = createAndroidComposeRule<MainActivity>()
 
     @Test fun settingsKeepTheirPositionDuringBoundaryScrollsAndDrags() {
+        val frames = java.util.Collections.synchronizedList(mutableListOf<LongArray>())
+        val listener = android.view.Window.OnFrameMetricsAvailableListener { _, metrics, _ ->
+            frames.add(longArrayOf(metrics.getMetric(android.view.FrameMetrics.TOTAL_DURATION),
+                metrics.getMetric(android.view.FrameMetrics.LAYOUT_MEASURE_DURATION), metrics.getMetric(android.view.FrameMetrics.DRAW_DURATION),
+                metrics.getMetric(android.view.FrameMetrics.DEADLINE)))
+        }
+        compose.runOnIdle { compose.activity.window.addOnFrameMetricsAvailableListener(listener, android.os.Handler(android.os.Looper.getMainLooper())) }
         compose.onNodeWithTag("chat_identity").performClick()
         val title = compose.onNodeWithText("Bot 设置")
         val initial = title.getUnclippedBoundsInRoot().top
@@ -40,7 +47,18 @@ class ConversationSettingsTest {
         val top = settings.getUnclippedBoundsInRoot().top
         repeat(4) { sheet.performTouchInput { swipeUp(durationMillis = 180) } }
         assertEquals(top.value, settings.getUnclippedBoundsInRoot().top.value, .5f)
-        compose.onNodeWithContentDescription("关闭设置").performClick()
+        val close = compose.onAllNodesWithContentDescription("关闭设置")
+        if (close.fetchSemanticsNodes().isNotEmpty()) close.onFirst().performClick()
+        else compose.onNodeWithContentDescription("返回").performClick()
+        compose.runOnIdle { compose.activity.window.removeOnFrameMetricsAvailableListener(listener) }
+        val samples = synchronized(frames) { frames.toList() }
+        assertTrue(samples.isNotEmpty())
+        val summary = (0..2).map { column -> samples.map { it[column] / 1_000_000.0 }.sorted().let {
+            "p50=${it[it.size / 2]} p95=${it[((it.size - 1) * .95).toInt()]} max=${it.last()}"
+        } }
+        val report = "frames=${samples.size} refreshHz=${compose.activity.display?.refreshRate} total/layout/draw(ms)=$summary overDeadline=${samples.count { it[3] > 0 && it[0] > it[3] }}"
+        File(compose.activity.cacheDir, "settings-frame-timing.txt").writeText(report)
+        androidx.test.platform.app.InstrumentationRegistry.getInstrumentation().sendStatus(2, android.os.Bundle().apply { putString("settingsFrames", report) })
     }
 
     @Test fun floatingChatScrollsUnderControlsInBothThemes() {
@@ -137,9 +155,9 @@ class ConversationSettingsTest {
         try {
             compose.onNodeWithContentDescription("更多选项").performClick()
             compose.onNodeWithText("设置").performClick()
-            compose.onNode(hasText("外观") and hasClickAction()).performClick()
             for (mode in listOf(Appearance.LIGHT, Appearance.DARK, Appearance.SYSTEM)) {
-                compose.onNode(hasText(mode.label) and hasClickAction()).performClick()
+                compose.onNode(hasText("外观") and hasClickAction()).performClick()
+                compose.onAllNodes(hasText(mode.label) and hasClickAction()).onLast().performClick()
                 compose.runOnIdle {
                     assertEquals(mode, model.appearance)
                     assertEquals(mode.name, compose.activity.getSharedPreferences("phonebot", 0).getString("appearance", null))
@@ -150,6 +168,85 @@ class ConversationSettingsTest {
         } finally { compose.runOnIdle { model.chooseAppearance(original) } }
     }
 
+    @Test fun settingsMenusShareThemeAndNavigation() {
+        lateinit var model: PhoneBotModel
+        compose.runOnIdle { model = ViewModelProvider(compose.activity)[PhoneBotModel::class.java] }
+        val original = model.appearance
+        try {
+            compose.onNodeWithContentDescription("更多选项").performClick()
+            compose.onNodeWithText("设置").performClick()
+            compose.onNodeWithText("启动引擎").assertDoesNotExist()
+            compose.onNodeWithText("运行自检").assertDoesNotExist()
+            for (mode in listOf(Appearance.LIGHT, Appearance.DARK)) {
+                compose.runOnIdle { model.chooseAppearance(mode) }
+                fun capture(name: String) {
+                    compose.waitForIdle()
+                    val automation = androidx.test.platform.app.InstrumentationRegistry.getInstrumentation()
+                        .getUiAutomation(android.app.UiAutomation.FLAG_DONT_SUPPRESS_ACCESSIBILITY_SERVICES)
+                    val bitmap = checkNotNull(automation.takeScreenshot())
+                    try { File(compose.activity.cacheDir, "settings-$name-${mode.name.lowercase()}.png").outputStream().use {
+                        bitmap.compress(Bitmap.CompressFormat.PNG, 100, it)
+                    } } finally { bitmap.recycle() }
+                }
+                capture("home")
+                compose.onNode(hasText("外观") and hasClickAction()).performClick()
+                compose.onNodeWithContentDescription("已选择").assertExists()
+                capture("menu")
+                compose.onAllNodesWithText(mode.label).onLast().assertIsDisplayed()
+                compose.onAllNodes(hasText(mode.label) and hasClickAction()).onLast().performClick()
+                compose.onNodeWithText("关于 PhoneBot").performClick()
+                compose.onNodeWithText("版本").assertIsDisplayed()
+                compose.onNodeWithContentDescription("返回").performClick()
+                compose.onNodeWithText("通知").performClick()
+                compose.onNodeWithText("允许通知").assertIsDisplayed()
+                compose.onNodeWithContentDescription("返回").performClick()
+                compose.onNodeWithText("手机控制").performClick()
+                compose.onNodeWithText("连接状态").assertIsDisplayed()
+                if (model.helperStates[model.session?.helper]?.optString("state") in setOf("ready", "running")) {
+                    compose.onNodeWithText("配对端口").assertDoesNotExist()
+                    compose.onNodeWithText("六位配对码").assertDoesNotExist()
+                }
+                capture("control")
+                compose.onNodeWithContentDescription("返回").performClick()
+                compose.onNodeWithText("排查问题").performScrollTo().performClick()
+                compose.onNodeWithText("运行自检").assertIsDisplayed()
+                compose.onNodeWithContentDescription("返回").performClick()
+            }
+        } finally { compose.runOnIdle { model.chooseAppearance(original) } }
+    }
+
+    @Test fun phoneControlShowsOnlyTheRequiredConnectionStep() {
+        lateinit var model: PhoneBotModel
+        compose.runOnIdle { model = ViewModelProvider(compose.activity)[PhoneBotModel::class.java] }
+        compose.onNodeWithTag("chat_identity").performClick()
+        compose.onNodeWithText("连接和授权").performScrollTo().performClick()
+        compose.onNode(hasText("控制方式") and hasClickAction()).performClick()
+        compose.onAllNodes(hasText("内置连接") and hasClickAction()).onLast().performClick()
+        compose.waitUntil(15000) { model.engine.state.value.canRun }
+        compose.runOnIdle { model.engine.detach() }
+        compose.waitForIdle()
+        val original = model.helperStates["builtin"]
+        try {
+            compose.runOnIdle { model.helperStates["builtin"] = JSONObject().put("state", "not_paired").put("paired", false) }
+            compose.onNodeWithText("配对端口").performScrollTo().performTextInput("12345")
+            compose.onNodeWithText("六位配对码").performScrollTo().performTextInput("123456")
+            compose.onNodeWithText("连接", useUnmergedTree = true).performScrollTo().assertIsDisplayed()
+            compose.runOnIdle { compose.activity.getSystemService(android.view.inputmethod.InputMethodManager::class.java)
+                .hideSoftInputFromWindow(compose.activity.window.decorView.windowToken, 0) }
+            compose.runOnIdle { model.helperStates["builtin"] = JSONObject().put("state", "disconnected").put("paired", true) }
+            compose.onNodeWithText("配对端口").assertDoesNotExist()
+            compose.onNodeWithText("重新连接").performScrollTo().assertIsDisplayed()
+            compose.runOnIdle { model.helperStates["builtin"] = JSONObject().put("state", "ready").put("paired", true) }
+            compose.onNodeWithText("重新连接").assertDoesNotExist()
+            compose.onNodeWithText("六位配对码").assertDoesNotExist()
+            compose.runOnIdle { model.helperStates["builtin"] = JSONObject().put("state", "permission_required").put("paired", true).put("message", "请允许本地网络访问") }
+            compose.onNodeWithText("请允许本地网络访问").performScrollTo().assertIsDisplayed()
+        } finally { compose.runOnIdle {
+            if (original == null) model.helperStates.remove("builtin") else model.helperStates["builtin"] = original
+            model.engine.attach()
+        } }
+    }
+
     @Test fun settingsRowsChangeTheSessionHelperAndScreen() {
         lateinit var model: PhoneBotModel
         compose.runOnIdle { model = ViewModelProvider(compose.activity)[PhoneBotModel::class.java] }
@@ -158,19 +255,22 @@ class ConversationSettingsTest {
         assertEquals("", model.activeTask)
         try {
             compose.onNodeWithTag("chat_identity").performClick()
-            for ((label, id) in listOf("内置助手" to "builtin", "Shizuku" to "shizuku")) {
-                compose.onNode(hasText(label) and hasClickAction()).performScrollTo().assertIsEnabled().performClick()
-                compose.onNode(hasText(label) and hasText("已选择")).assertIsDisplayed()
+            for ((label, id) in listOf("内置连接" to "builtin", "Shizuku" to "shizuku")) {
+                compose.onNode(hasText("控制方式") and hasClickAction()).performScrollTo().assertIsEnabled().performClick()
+                compose.onAllNodes(hasText(label) and hasClickAction()).onLast().performClick()
                 compose.runOnIdle { assertEquals(id, model.session?.helper) }
             }
-            for ((label, id) in listOf("主屏幕" to "main", "虚拟屏幕" to "virtual")) {
-                compose.onNode(hasText(label) and hasClickAction()).performScrollTo().assertIsEnabled().performClick()
-                compose.onNode(hasText(label) and hasText("已选择")).assertIsDisplayed()
+            for ((label, id) in listOf("手机屏幕" to "main", "独立屏幕" to "virtual")) {
+                compose.onNode(hasText("工作屏幕") and hasClickAction()).performScrollTo().assertIsEnabled().performClick()
+                compose.onAllNodes(hasText(label) and hasClickAction()).onLast().performClick()
                 compose.runOnIdle { assertEquals(id, model.session?.screen) }
             }
+            compose.onNodeWithText("连接和授权").performScrollTo().performClick()
+            compose.onNodeWithText("手机控制").assertIsDisplayed()
             compose.onNodeWithContentDescription("返回").performClick()
-            compose.onNodeWithText("版本").assertHasNoClickAction()
-            compose.onNodeWithText("引擎").assertHasNoClickAction()
+            compose.onNodeWithText("Bot 设置").assertIsDisplayed()
+            compose.onNodeWithContentDescription("返回").performClick()
+            compose.onNodeWithTag("chat_identity").assertIsDisplayed()
         } finally {
             compose.runOnIdle { model.choosePhone(original.helper, original.screen) }
             compose.waitUntil(5000) {

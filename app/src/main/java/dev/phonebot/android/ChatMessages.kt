@@ -7,8 +7,6 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.text.selection.SelectionContainer
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.outlined.KeyboardArrowDown
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -185,7 +183,7 @@ private data class ChatRow(val turn: ChatTurn, val part: String, val step: TaskS
         .clickable(source, indication = null, role = Role.Button, onClick = click), verticalAlignment = Alignment.CenterVertically) {
         Text(text, style = if (tool) PhoneUi.traceBody else PhoneUi.traceHeading, color = color,
             fontWeight = if (tool) FontWeight.SemiBold else FontWeight.Medium, modifier = if (tool) Modifier.weight(1f) else Modifier)
-        Icon(Icons.Outlined.KeyboardArrowDown, null, tint = color, modifier = Modifier.padding(start = 6.dp).size(20.dp).rotate(if (expanded) 0f else -90f))
+        Icon(androidx.compose.ui.res.painterResource(R.drawable.ic_ui_chevron_down), null, tint = color, modifier = Modifier.padding(start = 6.dp).size(20.dp).rotate(if (expanded) 0f else -90f))
     }
 }
 

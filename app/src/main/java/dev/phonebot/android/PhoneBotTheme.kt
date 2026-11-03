@@ -57,7 +57,15 @@ internal object PhoneUi {
     val attachmentHeight = 240.dp
     val rowHeight = 64.dp
     val rowValueWidth = 110.dp
-    val rowLeadingInset = 58.dp
+    val rowLeadingInset = 54.dp
+    val settingsInset = 20.dp
+    val settingsShape = RoundedCornerShape(20.dp)
+    val menuElevation = 2.dp
+    val settingsTitle = TextStyle(fontSize = 24.sp, lineHeight = 32.sp, fontWeight = FontWeight.SemiBold)
+    val settingsLabel = TextStyle(fontSize = 17.sp, lineHeight = 24.sp, fontWeight = FontWeight.Medium)
+    val settingsValue = TextStyle(fontSize = 15.sp, lineHeight = 22.sp)
+    val settingsNote = TextStyle(fontSize = 13.sp, lineHeight = 18.sp)
+    val menuText = TextStyle(fontSize = 16.sp, lineHeight = 24.sp)
     const val disabledAlpha = .38f
     const val hintAlpha = .7f
     val hint = TextStyle(fontSize = 11.sp, lineHeight = 16.sp)

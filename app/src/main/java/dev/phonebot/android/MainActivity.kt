@@ -27,11 +27,6 @@ import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.horizontalScroll
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.automirrored.filled.ArrowForward
-import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
-import androidx.compose.material.icons.outlined.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -48,11 +43,11 @@ import dev.chrisbanes.haze.blur.*
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
-import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.unit.Constraints
@@ -108,6 +103,7 @@ class MainActivity : ComponentActivity() {
     val drawer = rememberDrawerState(DrawerValue.Closed)
     androidx.activity.compose.BackHandler(enabled = drawer.isOpen) { scope.launch { drawer.close() } }
     val snackbar = remember { SnackbarHostState() }
+    var helperReturn by remember { mutableStateOf("settings") }
     var panel by rememberSaveable { mutableStateOf("") }
     var query by rememberSaveable { mutableStateOf("") }
     val drafts = rememberSaveable(saver = mapSaver<androidx.compose.runtime.snapshots.SnapshotStateMap<String, String>>(
@@ -119,7 +115,7 @@ class MainActivity : ComponentActivity() {
     val context = LocalContext.current
     val lifecycle = LocalLifecycleOwner.current.lifecycle
     LaunchedEffect(panel, engine.canRun) {
-        if (panel == "helpers" && engine.canRun) model.helperCommand("status")
+        if (panel == "settings" && engine.canRun) { model.catalog(); model.helperCommand("status") }
     }
     DisposableEffect(lifecycle) {
         val observer = LifecycleEventObserver { _, event -> if (event == Lifecycle.Event.ON_RESUME) model.refreshPermissions() }
@@ -136,7 +132,7 @@ class MainActivity : ComponentActivity() {
             Column(Modifier.fillMaxSize().padding(horizontal = PhoneUi.inset)) {
                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                     SearchField(query, { query = it }, "搜索 Bot", Modifier.weight(1f).padding(top = PhoneUi.space, bottom = PhoneUi.small))
-                    ToolIcon(Icons.Outlined.Add, "创建 Bot", { model.newSession(); panel = "session"; scope.launch { drawer.close() } })
+                    ToolIcon(R.drawable.ic_ui_plus, "创建 Bot", { model.newSession(); panel = "session"; scope.launch { drawer.close() } })
                 }
                 val filtered = model.sessions.filter { it.title.contains(query, true) || it.turns.any { turn -> turn.prompt.contains(query, true) || turn.answer.contains(query, true) } }.sortedByDescending { it.updated }
                 LazyColumn(Modifier.weight(1f)) {
@@ -168,9 +164,9 @@ class MainActivity : ComponentActivity() {
                     if (filtered.isEmpty()) item { Text("没有匹配的 Bot", Modifier.padding(PhoneUi.space), color = MaterialTheme.colorScheme.onSurfaceVariant) }
                 }
                 Row(Modifier.fillMaxWidth().navigationBarsPadding().clickable { panel = "settings" }.padding(PhoneUi.inset, PhoneUi.space), verticalAlignment = Alignment.CenterVertically) {
-                    Icon(Icons.Outlined.AccountCircle, null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(PhoneUi.send))
+                    Icon(painterResource(R.drawable.ic_ui_user_round), null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(PhoneUi.send))
                     Text("PhoneBot", Modifier.weight(1f).padding(start = PhoneUi.inset), fontWeight = FontWeight.Medium)
-                    Icon(Icons.Outlined.Settings, "设置", tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Icon(painterResource(R.drawable.ic_ui_settings_2), "设置", tint = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             }
         }
@@ -187,17 +183,16 @@ class MainActivity : ComponentActivity() {
                         Text(when (model.permission) {
                             "accessibility" -> "任务已暂停：需要无障碍服务"
                             "unlock" -> "任务已暂停：请亮屏并解锁"
-                            "builtin" -> "任务已暂停：请连接内置助手"
+                            "builtin" -> "任务已暂停：内置连接不可用"
                             "shizuku" -> "任务已暂停：请启动并授权 Shizuku"
                             "screen" -> "任务已暂停：目标屏幕不可用"
-                            else -> "任务已暂停：请检查助手和屏幕"
+                            else -> "任务已暂停：请检查连接和工作屏幕"
                         }, fontWeight = FontWeight.Medium)
                         if (model.permissionMessage.isNotBlank()) Text(model.permissionMessage, color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(top = PhoneUi.small))
                         Row(horizontalArrangement = Arrangement.spacedBy(PhoneUi.small)) {
                             TextButton(onClick = {
-                                panel = if (model.permission in setOf("accessibility", "unlock")) "permissions" else "helpers"
-                                if (panel == "helpers") model.helperCommand("status", model.session?.helper ?: "shizuku")
-                            }) { Text(if (model.permission in setOf("builtin", "shizuku", "screen")) "设备助手" else "查看权限") }
+                                helperReturn = "settings"; model.refreshPermissions(); panel = "helpers"
+                            }) { Text(if (model.permission in setOf("builtin", "shizuku", "screen")) "手机控制" else "查看权限") }
                             TextButton(onClick = model::resume, enabled = required?.granted != false) { Text("继续任务") }
                         }
                     }
@@ -220,96 +215,93 @@ class MainActivity : ComponentActivity() {
     }
     if (panel.isNotEmpty()) {
         ModalBottomSheet(onDismissRequest = { panel = "" }, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
-            sheetGesturesEnabled = false, containerColor = MaterialTheme.colorScheme.surface, dragHandle = null, shape = MaterialTheme.shapes.extraLarge) {
+            sheetGesturesEnabled = false, containerColor = MaterialTheme.colorScheme.surfaceContainerLow, dragHandle = null, shape = MaterialTheme.shapes.extraLarge) {
             Column(Modifier.fillMaxWidth().fillMaxHeight(.94f).testTag("settings_sheet")) {
                 val providerId = panel.removePrefix("provider:")
                 val title = when {
                     panel == "settings" -> "设置"
-                    panel == "providers" -> "模型服务"
+                    panel == "providers" -> "模型账号"
                     panel == "bot-models" -> "选择模型服务"
                     panel.startsWith("bot-provider:") -> model.providers.find { it.id == panel.removePrefix("bot-provider:") }?.name.orEmpty()
-                    panel == "permissions" -> "权限"
+                    panel == "notifications" -> "通知"
+                    panel == "diagnostics" -> "排查问题"
+                    panel == "about" -> "关于 PhoneBot"
                     panel == "session" -> "Bot 设置"
-                    panel == "helpers" -> "设备助手"
-                    panel == "appearance" -> "外观"
+                    panel == "helpers" -> "手机控制"
                     else -> model.providers.find { it.id == providerId }?.name ?: providerId
                 }
-                Row(Modifier.fillMaxWidth().padding(PhoneUi.inset), verticalAlignment = Alignment.CenterVertically) {
-                    if (panel != "settings") ToolIcon(Icons.AutoMirrored.Filled.ArrowBack, "返回", { panel = when { panel.startsWith("bot-provider:") -> "bot-models"; panel == "bot-models" -> "session"; panel.startsWith("provider:") -> "providers"; else -> "settings" } }) else Spacer(Modifier.width(PhoneUi.touch))
-                    Text(title, Modifier.weight(1f), textAlign = androidx.compose.ui.text.style.TextAlign.Center, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold, maxLines = 2)
-                    ToolIcon(Icons.Outlined.Close, "关闭设置", { panel = "" }, filled = true)
+                Row(Modifier.fillMaxWidth().padding(horizontal = PhoneUi.settingsInset, vertical = PhoneUi.inset), verticalAlignment = Alignment.CenterVertically) {
+                    ToolIcon(R.drawable.ic_ui_arrow_left, "返回", {
+                        panel = when {
+                            panel == "settings" -> ""
+                            panel == "session" -> ""
+                            panel.startsWith("bot-provider:") -> "bot-models"
+                            panel == "bot-models" -> "session"
+                            panel.startsWith("provider:") -> "providers"
+                            panel == "helpers" -> helperReturn
+                            else -> "settings"
+                        }
+                    })
+                    Text(title, Modifier.weight(1f).padding(start = PhoneUi.small), style = PhoneUi.settingsTitle, maxLines = 2)
+                    if (panel != "settings") ToolIcon(R.drawable.ic_ui_x, "关闭设置", { panel = "" })
                 }
                 Box(Modifier.weight(1f).fillMaxWidth().testTag("settings_body")) { when {
-                    panel == "settings" -> Column(Modifier.verticalScroll(rememberScrollState()).padding(PhoneUi.space), verticalArrangement = Arrangement.spacedBy(PhoneUi.gap)) {
+                    panel == "settings" -> Column(Modifier.verticalScroll(rememberScrollState()).padding(horizontal = PhoneUi.settingsInset, vertical = PhoneUi.space), verticalArrangement = Arrangement.spacedBy(PhoneUi.gap)) {
                         SettingsGroup {
-                            SettingsRow(Icons.Outlined.AccountCircle, "模型服务", model.providers.find { it.id == model.provider }?.name.orEmpty()) { panel = "providers"; model.catalog() }
+                            SettingsRow(R.drawable.ic_ui_key_round, "模型账号", if (model.providers.isEmpty()) "" else "已连接 ${model.providers.count { it.configured }} 项") { panel = "providers"; model.catalog() }
                             InsetDivider()
-                            SettingsRow(Icons.Outlined.Lock, "权限", "${model.permissions.count { it.granted }}/${model.permissions.size}") { model.refreshPermissions(); panel = "permissions" }
-                            InsetDivider()
-                            SettingsRow(Icons.Outlined.Settings, "设备助手") { panel = "helpers"; model.helperCommand("status") }
+                            SettingsRow(R.drawable.ic_ui_cable, "手机控制", model.helperStates[model.session?.helper]?.let { helperStateName(it.optString("state")) }.orEmpty()) {
+                                helperReturn = "settings"; model.refreshPermissions(); panel = "helpers"
+                            }
                         }
-                        SettingsGroup { SettingsRow(Icons.Outlined.Settings, "外观", model.appearance.label) { panel = "appearance" } }
                         SettingsGroup {
-                            SettingsRow(Icons.Outlined.PlayArrow, "引擎", phaseName(engine.phase), arrow = false)
+                            SettingsChoice(R.drawable.ic_ui_sun_moon, "外观", model.appearance.name, Appearance.entries.map { it.name to it.label }) { model.chooseAppearance(Appearance.from(it)) }
                             InsetDivider()
-                            if (engine.canStart) SettingsRow(Icons.Outlined.PlayArrow, "启动引擎") { model.engine.start() }
-                            else SettingsRow(Icons.Outlined.Close, "停止引擎", enabled = engine.canStop) { model.engine.stop() }
-                            InsetDivider()
-                            SettingsRow(Icons.Outlined.Refresh, "运行自检", enabled = engine.canRun) { model.engine.probe() }
+                            SettingsRow(R.drawable.ic_ui_bell, "通知", if (model.permissions.firstOrNull { it.id == "notifications" }?.granted == true) "已开启" else "未开启") { model.refreshPermissions(); panel = "notifications" }
                         }
-                        if (engine.phase == EnginePhase.FAILED || engine.detail.startsWith("Error:")) Text(engine.detail.take(500), color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.labelLarge, modifier = Modifier.padding(horizontal = PhoneUi.inset))
-                        SettingsGroup { SettingsRow(Icons.Outlined.Info, "版本", "0.2.0", arrow = false) }
-                    }
-                    panel == "appearance" -> SettingsGroup {
-                        Appearance.entries.forEachIndexed { index, mode ->
-                            if (index > 0) InsetDivider()
-                            SettingsRow(Icons.Outlined.Settings, mode.label, if (model.appearance == mode) "已选择" else "", arrow = false) { model.chooseAppearance(mode) }
+                        SettingsGroup {
+                            SettingsRow(R.drawable.ic_ui_info, "关于 PhoneBot") { panel = "about" }
+                            InsetDivider()
+                            SettingsRow(R.drawable.ic_ui_activity, "排查问题") { panel = "diagnostics" }
                         }
                     }
+                    panel == "diagnostics" -> Column(Modifier.verticalScroll(rememberScrollState()).padding(PhoneUi.settingsInset), verticalArrangement = Arrangement.spacedBy(PhoneUi.gap)) {
+                        SettingsGroup {
+                            SettingsRow(R.drawable.ic_ui_activity, "运行状态", phaseName(engine.phase), arrow = false)
+                            InsetDivider()
+                            if (engine.canStart) SettingsRow(R.drawable.ic_ui_play, "启动引擎") { model.engine.start() }
+                            else SettingsRow(R.drawable.ic_ui_square, "停止引擎", enabled = engine.canStop) { model.engine.stop() }
+                            InsetDivider()
+                            SettingsRow(R.drawable.ic_ui_refresh_cw, "运行自检", enabled = engine.canRun) { model.engine.probe() }
+                        }
+                        if (engine.phase == EnginePhase.FAILED || engine.detail.startsWith("Error:")) Text(engine.detail.take(500), color = MaterialTheme.colorScheme.error, style = PhoneUi.settingsNote)
+                    }
+                    panel == "about" -> Column(Modifier.padding(PhoneUi.settingsInset)) { SettingsGroup { SettingsRow(R.drawable.ic_ui_info, "版本", "0.2.0", arrow = false) } }
+                    panel == "notifications" -> Column(Modifier.verticalScroll(rememberScrollState()).padding(PhoneUi.settingsInset)) { PermissionRows(model, setOf("notifications", "task_results")) }
                     panel == "bot-models" -> ProviderList(model, engine.canRun && model.activeTask.isEmpty()) { id -> panel = "bot-provider:$id"; model.catalog(id) }
                     panel.startsWith("bot-provider:") -> ProviderDetail(model, panel.removePrefix("bot-provider:"), engine.canRun && model.activeTask.isEmpty(), true)
                     panel == "providers" -> ProviderList(model, engine.canRun) { id -> panel = "provider:$id"; model.catalog(id) }
-                    panel == "session" -> Column(Modifier.verticalScroll(rememberScrollState()).padding(PhoneUi.space), verticalArrangement = Arrangement.spacedBy(PhoneUi.gap)) {
+                    panel == "session" -> Column(Modifier.verticalScroll(rememberScrollState()).padding(horizontal = PhoneUi.settingsInset, vertical = PhoneUi.space), verticalArrangement = Arrangement.spacedBy(PhoneUi.gap)) {
                         val current = model.session
                         val enabled = model.activeTask.isEmpty()
                         BotEditor(model, enabled)
                         SettingsGroup {
-                            SettingsRow(Icons.Outlined.AccountCircle, "模型", current?.model?.ifEmpty { "选择模型" }.orEmpty(), enabled = enabled) { panel = "bot-models"; model.catalog() }
+                            SettingsRow(R.drawable.ic_ui_layers, "模型", current?.model?.ifEmpty { "选择模型" }.orEmpty(), enabled = enabled) { panel = "bot-models"; model.catalog() }
                         }
                         SettingsGroup {
-                            listOf("builtin" to "内置助手", "shizuku" to "Shizuku").forEachIndexed { index, (id, label) ->
-                                if (index > 0) InsetDivider()
-                                SettingsRow(Icons.Outlined.Settings, label, if (current?.helper == id) "已选择" else "", enabled = enabled, arrow = false) { model.choosePhone(helper = id) }
-                            }
-                        }
-                        SettingsGroup {
-                            listOf("main" to "主屏幕", "virtual" to "虚拟屏幕").forEachIndexed { index, (id, label) ->
-                                if (index > 0) InsetDivider()
-                                SettingsRow(Icons.Outlined.Settings, label, if (current?.screen == id) "已选择" else "", enabled = enabled && (id == "main" || Build.VERSION.SDK_INT >= 34), arrow = false) { model.choosePhone(screen = id) }
-                            }
-                        }
-                        SettingsGroup {
-                            SettingsRow(Icons.Outlined.Check, "设为新 Bot 默认配置", enabled = enabled) { model.savePhoneDefaults() }
+                            SettingsChoice(R.drawable.ic_ui_cable, "控制方式", current?.helper.orEmpty(), HelperOptions, enabled) { model.choosePhone(helper = it) }
                             InsetDivider()
-                            SettingsRow(Icons.Outlined.Lock, "连接和授权") { panel = "helpers"; model.helperCommand("status") }
+                            SettingsChoice(R.drawable.ic_ui_smartphone, "工作屏幕", current?.screen.orEmpty(),
+                                listOf("main" to "手机屏幕", "virtual" to if (Build.VERSION.SDK_INT >= 34) "独立屏幕" else "独立屏幕 · 需要 Android 14"),
+                                enabled, if (Build.VERSION.SDK_INT < 34) setOf("virtual") else emptySet()) { model.choosePhone(screen = it) }
+                        }
+                        SettingsGroup {
+                            SettingsRow(R.drawable.ic_ui_check, "设为新 Bot 默认配置", enabled = enabled) { model.savePhoneDefaults() }
+                            InsetDivider()
+                            SettingsRow(R.drawable.ic_ui_cable, "连接和授权") { helperReturn = "session"; panel = "helpers"; model.refreshPermissions() }
                         }
                     }
                     panel == "helpers" -> HelperSettings(model, engine.canRun)
-                    panel == "permissions" -> Column(Modifier.verticalScroll(rememberScrollState()).padding(PhoneUi.space), verticalArrangement = Arrangement.spacedBy(PhoneUi.gap)) {
-                        model.permissions.forEach { permission ->
-                            SettingsGroup {
-                                SettingsRow(if (permission.id in setOf("notifications", "task_results")) Icons.Outlined.Notifications else Icons.Outlined.Lock, permission.name, if (permission.granted) "已开启" else "待授权") {
-                                    if (permission.id == "notifications" && PhonePermissions.notificationPermission() != null && !permission.granted)
-                                        (context as? ComponentActivity)?.requestPermissions(arrayOf(PhonePermissions.notificationPermission()!!), 1)
-                                    else if (permission.id == "local_network" && !permission.granted)
-                                        (context as? ComponentActivity)?.requestPermissions(arrayOf("android.permission.ACCESS_LOCAL_NETWORK"), 3)
-                                    else if (permission.id == "shizuku" && Shizuku.pingBinder() && !permission.granted) Shizuku.requestPermission(2)
-                                    else context.startActivity(PhonePermissions.settings(context, permission.id))
-                                }
-                                Text(permission.purpose, color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(start = PhoneUi.rowLeadingInset, end = PhoneUi.space, bottom = PhoneUi.space))
-                            }
-                        }
-                    }
                     else -> ProviderDetail(model, providerId, engine.canRun)
                 } }
             }
@@ -365,7 +357,7 @@ class MainActivity : ComponentActivity() {
     val identity = remember { MutableInteractionSource() }
     Row(Modifier.fillMaxWidth().padding(horizontal = PhoneUi.inset, vertical = PhoneUi.small),
         verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(PhoneUi.small)) {
-        ToolIcon(Icons.Outlined.Menu, "打开对话列表", conversations, filled = true)
+        ToolIcon(R.drawable.ic_ui_panel_left, "打开对话列表", conversations, filled = true)
         Box(Modifier.weight(1f), contentAlignment = Alignment.Center) {
             Surface(onClick = session, interactionSource = identity, modifier = Modifier.heightIn(min = PhoneUi.touch).testTag("chat_identity")
                 .semantics { contentDescription = listOfNotNull(bot?.title ?: "PhoneBot", bot?.provider?.takeIf { it.isNotBlank() }).joinToString("，") },
@@ -383,7 +375,7 @@ class MainActivity : ComponentActivity() {
             }
         }
         Box {
-            ToolIcon(Icons.Outlined.MoreVert, "更多选项", { menu = true }, filled = true, modifier = Modifier.rotate(90f))
+            ToolIcon(R.drawable.ic_ui_ellipsis, "更多选项", { menu = true }, filled = true)
             DropdownMenu(menu, { menu = false }) {
                 DropdownMenuItem(text = { Text("创建 Bot") }, onClick = { menu = false; newChat() })
                 DropdownMenuItem(text = { Text("设置") }, onClick = { menu = false; settings() })
@@ -392,47 +384,110 @@ class MainActivity : ComponentActivity() {
     }
 }
 
+private val HelperOptions = listOf("builtin" to "内置连接", "shizuku" to "Shizuku")
+
+@Composable private fun PermissionRows(model: PhoneBotModel, ids: Set<String>) {
+    val context = LocalContext.current
+    SettingsGroup {
+        model.permissions.filter { it.id in ids }.forEachIndexed { index, permission ->
+            if (index > 0) InsetDivider()
+            val title = when (permission.id) {
+                "accessibility" -> "读取和操作屏幕"
+                "write_settings" -> "调节屏幕亮度"
+                "notifications" -> "允许通知"
+                "task_results" -> "任务完成提醒"
+                else -> permission.name
+            }
+            SettingsRow(when (permission.id) {
+                "notifications", "task_results" -> R.drawable.ic_ui_bell
+                "write_settings" -> R.drawable.ic_ui_sun_moon
+                else -> R.drawable.ic_ui_smartphone
+            },
+                title, if (permission.granted) "已开启" else "待开启") {
+                if (permission.id == "notifications" && !permission.granted && PhonePermissions.notificationPermission() != null)
+                    (context as? ComponentActivity)?.requestPermissions(arrayOf(PhonePermissions.notificationPermission()!!), 1)
+                else context.startActivity(PhonePermissions.settings(context, permission.id))
+            }
+            if (!permission.granted) Text(permission.purpose, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                style = PhoneUi.settingsNote, modifier = Modifier.padding(start = PhoneUi.rowLeadingInset, end = PhoneUi.space, bottom = PhoneUi.space))
+        }
+    }
+}
+
 @Composable private fun HelperSettings(model: PhoneBotModel, ready: Boolean) {
     val context = LocalContext.current
-    var port by remember { mutableStateOf("") }
+    var helper by rememberSaveable { mutableStateOf(model.session?.helper ?: "builtin") }
+    var port by rememberSaveable { mutableStateOf("") }
     var code by remember { mutableStateOf("") }
-    val enabled = model.activeTask.isEmpty() || model.permission.isNotEmpty()
-    val builtinEnabled = enabled && Build.VERSION.SDK_INT >= 31
-    val state = model.helperStates["builtin"]
-    LaunchedEffect(state) { if (state?.optBoolean("paired") == true || state?.optString("state") in setOf("ready", "running")) code = "" }
+    var menu by remember { mutableStateOf(false) }
+    val state = model.helperStates[helper]
+    val enabled = (model.activeTask.isEmpty() || model.permission.isNotEmpty()) && state?.optString("state") != "connecting"
+    val paired = state?.optBoolean("paired") == true || state?.optString("state") in setOf("ready", "running")
+    val online = state?.optString("state") in setOf("ready", "running")
     val network = model.permissions.firstOrNull { it.id == "local_network" }
-    Column(Modifier.verticalScroll(rememberScrollState()).padding(PhoneUi.space), verticalArrangement = Arrangement.spacedBy(PhoneUi.space)) {
-        Text("连接由所有 Bot 共享。主屏普通操作只需无障碍权限。", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodyMedium)
+    LaunchedEffect(helper, ready) { if (ready) model.helperCommand("status", helper) }
+    LaunchedEffect(paired) { if (paired) code = "" }
+    Column(Modifier.verticalScroll(rememberScrollState()).padding(horizontal = PhoneUi.settingsInset, vertical = PhoneUi.space),
+        verticalArrangement = Arrangement.spacedBy(PhoneUi.gap)) {
+        PermissionRows(model, setOf("accessibility", "write_settings"))
         SettingsGroup {
-            SettingsRow(Icons.Outlined.Settings, "内置助手", helperStateName(state?.optString("state")), arrow = false)
+            SettingsChoice(R.drawable.ic_ui_cable, "控制方式", helper, HelperOptions) { helper = it }
+            InsetDivider()
+            SettingsRow(R.drawable.ic_ui_activity, "连接状态", helperStateName(state?.optString("state")), arrow = false, trailing = {
+                Box {
+                    ToolIcon(R.drawable.ic_ui_ellipsis, "更多连接操作", { menu = true })
+                    DropdownMenu(menu, { menu = false }, shape = MaterialTheme.shapes.medium, containerColor = MaterialTheme.colorScheme.surfaceContainerLowest) {
+                        DropdownMenuItem(text = { Text("刷新连接状态") }, onClick = { menu = false; model.helperCommand("status", helper) }, enabled = ready)
+                        if (helper == "builtin" && paired) DropdownMenuItem(text = { Text("解除配对", color = MaterialTheme.colorScheme.error) },
+                            onClick = { menu = false; model.helperCommand("forget", helper); code = ""; port = "" }, enabled = model.activeTask.isEmpty())
+                    }
+                }
+            })
         }
-        state?.optString("message")?.takeIf { it.isNotBlank() }?.let { Text(it, color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodyMedium) }
-        if (Build.VERSION.SDK_INT < 31) Text("内置助手需要 Android 12 及以上。", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodyMedium)
-        if (network != null && !network.granted) {
-            OutlinedButton(onClick = { (context as? ComponentActivity)?.requestPermissions(arrayOf("android.permission.ACCESS_LOCAL_NETWORK"), 3) }) { Text("允许本地网络访问") }
+        if (!online) state?.optString("message")?.takeIf { it.isNotBlank() }?.let {
+            Text(it, color = MaterialTheme.colorScheme.onSurfaceVariant, style = PhoneUi.settingsNote)
         }
-        OutlinedButton(onClick = { context.startActivity(Intent(android.provider.Settings.ACTION_APPLICATION_DEVELOPMENT_SETTINGS)) }) { Text("打开无线调试设置") }
-        OutlinedTextField(port, { value -> port = value.filter(Char::isDigit).take(5) }, label = { Text("配对端口") },
-            singleLine = true, enabled = builtinEnabled, modifier = Modifier.fillMaxWidth(), keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number))
-        OutlinedTextField(code, { value -> code = value.filter(Char::isDigit).take(6) }, label = { Text("六位配对码") },
-            singleLine = true, enabled = builtinEnabled, modifier = Modifier.fillMaxWidth(), keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword), visualTransformation = PasswordVisualTransformation())
-        Text("在无线调试中打开“使用配对码配对设备”，填写该弹窗的端口和配对码。", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.labelLarge)
-        Row(horizontalArrangement = Arrangement.spacedBy(PhoneUi.small)) {
-            Button(onClick = { model.helperCommand("pair", "builtin", port.toInt(), code); code = "" },
-                enabled = builtinEnabled && (port.toIntOrNull() ?: 0) in 1..65535 && code.length == 6 && network?.granted != false) { Text("配对") }
-            OutlinedButton(onClick = { model.helperCommand("connect", "builtin") }, enabled = builtinEnabled && network?.granted != false) { Text("重新连接") }
-            TextButton(onClick = { model.helperCommand("forget", "builtin"); code = ""; port = "" }, enabled = model.activeTask.isEmpty()) { Text("解除配对") }
+        if (helper == "builtin") {
+            if (Build.VERSION.SDK_INT < 31) Text("内置连接需要 Android 12 及以上。", style = PhoneUi.settingsNote)
+            else {
+                if (network != null && !network.granted) OutlinedButton(onClick = {
+                    (context as? ComponentActivity)?.requestPermissions(arrayOf("android.permission.ACCESS_LOCAL_NETWORK"), 3)
+                }) { Text("允许查找本机连接") }
+                if (!paired) {
+                    SettingsGroup {
+                        SettingsRow(R.drawable.ic_ui_smartphone, "打开无线调试设置") {
+                            context.startActivity(Intent(android.provider.Settings.ACTION_APPLICATION_DEVELOPMENT_SETTINGS))
+                        }
+                    }
+                    Column(verticalArrangement = Arrangement.spacedBy(PhoneUi.space)) {
+                        Text("在“无线调试”中打开“使用配对码配对设备”，填写弹窗中的端口和配对码。", style = PhoneUi.settingsNote, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        OutlinedTextField(port, { port = it.filter(Char::isDigit).take(5) }, label = { Text("配对端口") },
+                            modifier = Modifier.fillMaxWidth(), singleLine = true, enabled = enabled, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number))
+                        OutlinedTextField(code, { code = it.filter(Char::isDigit).take(6) }, label = { Text("六位配对码") },
+                            modifier = Modifier.fillMaxWidth(), singleLine = true, enabled = enabled, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
+                            visualTransformation = PasswordVisualTransformation())
+                        Button(onClick = { model.helperCommand("pair", helper, port.toInt(), code); code = "" },
+                            enabled = enabled && ready && (port.toIntOrNull() ?: 0) in 1..65535 && code.length == 6 && network?.granted != false,
+                            modifier = Modifier.fillMaxWidth()) { Text("连接") }
+                    }
+                } else {
+                    if (!online) Button(onClick = { model.helperCommand("connect", helper) }, enabled = enabled && ready && network?.granted != false) { Text("重新连接") }
+                    SettingsGroup {
+                        SettingsRow(R.drawable.ic_ui_refresh_cw, "重启后自动恢复", arrow = false, trailing = {
+                            Switch(checked = state?.optBoolean("autoRestore") == true,
+                                onCheckedChange = { model.helperCommand("recovery", helper, enabled = it) }, enabled = model.activeTask.isEmpty() && ready)
+                        })
+                    }
+                    Text("需开启无线调试并连接可信 Wi-Fi。", style = PhoneUi.settingsNote, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            }
+        } else if (!online) {
+            val needsGrant = Shizuku.pingBinder() && Shizuku.checkSelfPermission() != android.content.pm.PackageManager.PERMISSION_GRANTED
+            Button(onClick = {
+                if (needsGrant) Shizuku.requestPermission(2)
+                else context.startActivity(PhonePermissions.settings(context, "shizuku"))
+            }, enabled = enabled) { Text(if (needsGrant) "授权 PhoneBot" else "打开 Shizuku") }
         }
-        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-            Text("重启后自动恢复", Modifier.weight(1f))
-            Switch(checked = state?.optBoolean("autoRestore") == true, onCheckedChange = { model.helperCommand("recovery", "builtin", enabled = it) }, enabled = model.activeTask.isEmpty() && ready)
-        }
-        Text("开启后允许助手配置恢复所需的系统授权。无线调试和可信 Wi-Fi 可用时尝试恢复。", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.labelLarge)
-        SettingsGroup { SettingsRow(Icons.Outlined.Lock, "Shizuku", helperStateName(model.helperStates["shizuku"]?.optString("state")), enabled = enabled) {
-            if (Shizuku.pingBinder() && Shizuku.checkSelfPermission() != android.content.pm.PackageManager.PERMISSION_GRANTED) Shizuku.requestPermission(2)
-            else context.startActivity(PhonePermissions.settings(context, "shizuku"))
-        } }
-        TextButton(onClick = { model.helperCommand("status", "builtin"); model.helperCommand("status", "shizuku") }, enabled = enabled) { Text("刷新连接状态") }
     }
 }
 
@@ -475,7 +530,7 @@ private fun helperStateName(state: String?): String = when (state) {
                 modifier = Modifier.align(Alignment.BottomEnd).size(PhoneUi.touch).semantics { contentDescription = if (busy) "停止任务" else "发送任务" }) {
                 Box(Modifier.size(PhoneUi.send).testTag("task_action").background(if (enabled) LocalBotActionColor.current else MaterialTheme.colorScheme.surfaceContainerHighest, CircleShape), contentAlignment = Alignment.Center) {
                     if (busy) Box(Modifier.size(PhoneUi.inset).background(Color.White, MaterialTheme.shapes.small))
-                    else Icon(Icons.AutoMirrored.Filled.ArrowForward, null, tint = if (enabled) Color.White else MaterialTheme.colorScheme.onSurface.copy(alpha = PhoneUi.disabledAlpha), modifier = Modifier.size(PhoneUi.icon).rotate(-90f))
+                    else Icon(painterResource(R.drawable.ic_ui_arrow_up), null, tint = if (enabled) Color.White else MaterialTheme.colorScheme.onSurface.copy(alpha = PhoneUi.disabledAlpha), modifier = Modifier.size(PhoneUi.icon))
                 }
             }
         }
@@ -485,10 +540,10 @@ private fun helperStateName(state: String?): String = when (state) {
 
 @Composable private fun ProviderList(model: PhoneBotModel, ready: Boolean, select: (String) -> Unit) {
     var search by rememberSaveable { mutableStateOf("") }
-    Column(Modifier.fillMaxSize().padding(horizontal = PhoneUi.space)) {
+    Column(Modifier.fillMaxSize().padding(horizontal = PhoneUi.settingsInset)) {
         SearchField(search, { search = it }, "搜索服务商", Modifier.padding(vertical = PhoneUi.inset))
         if (model.providers.isEmpty()) LinearProgressIndicator(Modifier.fillMaxWidth())
-        LazyColumn {
+        LazyColumn(Modifier.clip(PhoneUi.settingsShape).background(MaterialTheme.colorScheme.surfaceContainerLowest)) {
             items(model.providers.filter { it.name.contains(search, true) || it.id.contains(search, true) }, key = { it.id }) { provider ->
                 SettingsRow(title = provider.name, value = if (provider.configured) "已配置" else "", enabled = ready,
                     leading = { ProviderIcon(provider.id) }) { select(provider.id) }
@@ -506,15 +561,15 @@ private fun helperStateName(state: String?): String = when (state) {
         if (searchStarted) { kotlinx.coroutines.delay(300); model.catalog(id, query = search) }
         else searchStarted = true
     }
-    LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(PhoneUi.space), verticalArrangement = Arrangement.spacedBy(PhoneUi.inset)) {
+    LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(PhoneUi.settingsInset), verticalArrangement = Arrangement.spacedBy(PhoneUi.gap)) {
         if (!selectModel) item {
             SettingsGroup {
                 provider.auth.forEachIndexed { index, auth ->
-                    SettingsRow(Icons.Outlined.Lock, if (provider.configured) "修改认证 · ${auth.second}" else auth.second, enabled = ready) { model.login(id, auth.first) }
+                    SettingsRow(R.drawable.ic_ui_key_round, if (provider.configured) "修改认证 · ${auth.second}" else auth.second, enabled = ready) { model.login(id, auth.first) }
                     if (index < provider.auth.lastIndex) InsetDivider()
                 }
                 if (provider.ambient) Text("此服务商使用环境凭据。Android 尚未验证此认证方式。", color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(PhoneUi.space))
-                if (provider.configured) { InsetDivider(); SettingsRow(Icons.Outlined.Delete, "删除凭据", enabled = ready) { model.logout(id) } }
+                if (provider.configured) { InsetDivider(); SettingsRow(R.drawable.ic_ui_trash, "删除凭据", enabled = ready) { model.logout(id) } }
             }
         }
         val auth = model.authEvent
@@ -529,7 +584,7 @@ private fun helperStateName(state: String?): String = when (state) {
         if (selectModel) item {
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 Text("模型", Modifier.weight(1f), color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodyMedium)
-                ToolIcon(Icons.Outlined.Refresh, "刷新 Pi 模型目录", { model.refresh(id) }, enabled = ready)
+                ToolIcon(R.drawable.ic_ui_refresh_cw, "刷新 Pi 模型目录", { model.refresh(id) }, enabled = ready)
             }
             SearchField(search, { search = it }, "搜索模型")
         }
@@ -538,10 +593,10 @@ private fun helperStateName(state: String?): String = when (state) {
             Row(Modifier.fillMaxWidth().clip(MaterialTheme.shapes.medium).background(if (selected) MaterialTheme.colorScheme.surfaceContainerHighest else Color.Transparent)
                 .clickable(enabled = ready) { model.choose(id, item.id) }.padding(PhoneUi.space), verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(PhoneUi.tiny)) {
-                    Text(item.name, style = MaterialTheme.typography.bodyLarge, color = if (selected) MaterialTheme.colorScheme.tertiary else MaterialTheme.colorScheme.onSurface)
-                    Text((if (item.image) "支持图片 · " else "") + (if (model.verified(id, item.id)) "Android 连接已验证" else "Android 待验证"), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text(item.name, style = PhoneUi.settingsLabel, color = if (selected) MaterialTheme.colorScheme.tertiary else MaterialTheme.colorScheme.onSurface)
+                    Text((if (item.image) "支持图片 · " else "") + (if (model.verified(id, item.id)) "Android 连接已验证" else "Android 待验证"), style = PhoneUi.settingsNote, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
-                if (selected) Icon(Icons.Outlined.Check, "默认模型", tint = MaterialTheme.colorScheme.tertiary)
+                if (selected) Icon(painterResource(R.drawable.ic_ui_check), "默认模型", tint = MaterialTheme.colorScheme.tertiary)
             }
         }
         if (selectModel && model.models.size < model.modelTotal) item { TextButton(onClick = { model.catalog(id, model.models.size, search) }, enabled = ready) { Text("加载更多模型") } }
@@ -570,28 +625,60 @@ private fun helperStateName(state: String?): String = when (state) {
 
 @Composable private fun SearchField(value: String, change: (String) -> Unit, placeholder: String, modifier: Modifier = Modifier) {
     TextField(value, change, modifier.fillMaxWidth(), singleLine = true, placeholder = { Text(placeholder, style = MaterialTheme.typography.bodyLarge) },
-        leadingIcon = { Icon(Icons.Outlined.Search, null, tint = MaterialTheme.colorScheme.onSurfaceVariant) }, shape = MaterialTheme.shapes.extraLarge,
+        leadingIcon = { Icon(painterResource(R.drawable.ic_ui_search), null, tint = MaterialTheme.colorScheme.onSurfaceVariant) }, shape = MaterialTheme.shapes.extraLarge,
         colors = TextFieldDefaults.colors(focusedContainerColor = MaterialTheme.colorScheme.surfaceContainer, unfocusedContainerColor = MaterialTheme.colorScheme.surfaceContainer, focusedIndicatorColor = Color.Transparent, unfocusedIndicatorColor = Color.Transparent))
 }
 @Composable private fun SettingsGroup(content: @Composable ColumnScope.() -> Unit) {
-    Column(Modifier.fillMaxWidth().clip(MaterialTheme.shapes.large).background(MaterialTheme.colorScheme.surfaceContainer), content = content)
+    Column(Modifier.fillMaxWidth().clip(PhoneUi.settingsShape).background(MaterialTheme.colorScheme.surfaceContainerLowest), content = content)
 }
 @Composable private fun InsetDivider() { HorizontalDivider(Modifier.padding(start = PhoneUi.rowLeadingInset), color = MaterialTheme.colorScheme.outlineVariant, thickness = PhoneUi.hairline) }
-@Composable private fun SettingsRow(icon: ImageVector? = null, title: String, value: String = "", enabled: Boolean = true, arrow: Boolean = true,
-    leading: (@Composable () -> Unit)? = null, click: (() -> Unit)? = null) {
+@Composable private fun SettingsRow(icon: Int? = null, title: String, value: String = "", enabled: Boolean = true, arrow: Boolean = true,
+    leading: (@Composable () -> Unit)? = null, trailing: (@Composable () -> Unit)? = null, click: (() -> Unit)? = null) {
     Row(Modifier.fillMaxWidth().heightIn(min = PhoneUi.rowHeight)
         .then(if (click != null) Modifier.clickable(enabled = enabled, onClick = click) else Modifier)
-        .padding(PhoneUi.space, PhoneUi.space), verticalAlignment = Alignment.CenterVertically) {
-        if (leading != null) leading() else if (icon != null) Icon(icon, null, tint = if (enabled) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(PhoneUi.icon))
-        Text(title, Modifier.weight(1f).padding(start = PhoneUi.space, end = PhoneUi.small), style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Medium, color = if (enabled) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant)
-        if (value.isNotEmpty()) Text(value, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 2, modifier = Modifier.widthIn(max = PhoneUi.rowValueWidth), overflow = TextOverflow.Ellipsis)
-        if (arrow) Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(start = PhoneUi.small).size(PhoneUi.icon))
+        .padding(PhoneUi.space), verticalAlignment = Alignment.CenterVertically) {
+        if (leading != null) leading() else if (icon != null) Icon(painterResource(icon), null,
+            tint = if (enabled) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(PhoneUi.icon))
+        Text(title, Modifier.weight(1f).padding(start = PhoneUi.space, end = PhoneUi.small), style = PhoneUi.settingsLabel,
+            color = if (enabled) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant)
+        if (trailing != null) {
+            if (value.isNotEmpty()) Text(value, style = PhoneUi.settingsValue, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            trailing()
+        } else {
+            if (value.isNotEmpty()) Text(value, style = PhoneUi.settingsValue, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 2, modifier = Modifier.widthIn(max = PhoneUi.rowValueWidth), overflow = TextOverflow.Ellipsis)
+            if (arrow) Icon(painterResource(R.drawable.ic_ui_chevron_right), null, tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(start = PhoneUi.small).size(PhoneUi.icon))
+        }
     }
 }
-@Composable private fun ToolIcon(icon: ImageVector, label: String, click: () -> Unit, modifier: Modifier = Modifier, enabled: Boolean = true, filled: Boolean = false) {
+@Composable private fun SettingsChoice(icon: Int, title: String, selected: String, options: List<Pair<String, String>>,
+    enabled: Boolean = true, disabled: Set<String> = emptySet(), choose: (String) -> Unit) {
+    var expanded by remember { mutableStateOf(false) }
+    SettingsRow(icon, title, enabled = enabled, arrow = false, trailing = {
+        Box {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(options.firstOrNull { it.first == selected }?.second.orEmpty(), style = PhoneUi.settingsValue,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 2, overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.widthIn(max = PhoneUi.rowValueWidth))
+                Icon(painterResource(R.drawable.ic_ui_chevrons_up_down), null, tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(start = PhoneUi.small).size(PhoneUi.icon))
+            }
+            DropdownMenu(expanded, { expanded = false }, shape = MaterialTheme.shapes.medium,
+                containerColor = MaterialTheme.colorScheme.surfaceContainerLowest, tonalElevation = 0.dp, shadowElevation = PhoneUi.menuElevation) {
+                options.forEach { (id, label) ->
+                    DropdownMenuItem(text = { Text(label, style = PhoneUi.menuText) }, enabled = enabled && id !in disabled,
+                        trailingIcon = { if (selected == id) Icon(painterResource(R.drawable.ic_ui_check), "已选择", Modifier.size(PhoneUi.icon)) },
+                        onClick = { expanded = false; choose(id) })
+                }
+            }
+        }
+    }) { expanded = true }
+}
+@Composable private fun ToolIcon(icon: Int, label: String, click: () -> Unit, modifier: Modifier = Modifier, enabled: Boolean = true, filled: Boolean = false) {
     IconButton(onClick = click, enabled = enabled, modifier = modifier.size(PhoneUi.touch).then(if (filled)
         Modifier.background(MaterialTheme.colorScheme.background, CircleShape).border(PhoneUi.hairline, MaterialTheme.colorScheme.outlineVariant, CircleShape) else Modifier)) {
-        Icon(icon, label, modifier = Modifier.size(PhoneUi.icon))
+        Icon(painterResource(icon), label, modifier = Modifier.size(PhoneUi.icon))
     }
 }
 private fun phaseName(phase: EnginePhase) = when (phase) {

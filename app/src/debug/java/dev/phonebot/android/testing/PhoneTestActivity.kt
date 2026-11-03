@@ -15,16 +15,43 @@ import android.widget.TextView
 
 @SuppressLint("SetTextI18n")
 class PhoneTestActivity : Activity() {
-    @SuppressLint("AppCompatCustomView")
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        showPage()
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        showPage()
+    }
+
+    @SuppressLint("AppCompatCustomView")
+    private fun showPage() {
         val layout = LinearLayout(this).apply { id = android.R.id.list; orientation = LinearLayout.VERTICAL; setPadding(40, 120, 40, 40); setBackgroundColor(0xFFFFFFFF.toInt()) }
         layout.addView(TextView(this).apply { text = "PhoneBot 中文测试 Hello"; textSize = 24f; setTextColor(0xFF111111.toInt()) })
         layout.addView(object : EditText(this) {
-            override fun performAccessibilityAction(action: Int, arguments: Bundle?): Boolean =
-                if (intent.getBooleanExtra("pasteInput", false) && action == AccessibilityNodeInfo.ACTION_SET_TEXT) false
-                else super.performAccessibilityAction(action, arguments)
+            override fun performAccessibilityAction(action: Int, arguments: Bundle?): Boolean {
+                if (action == AccessibilityNodeInfo.ACTION_SET_TEXT) {
+                    if (intent.getBooleanExtra("pasteInput", false)) return false
+                    val value = arguments?.getCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE) ?: ""
+                    when (intent.getStringExtra("inputMode")) {
+                        "hint" -> return true
+                        "retained" -> { setText("旧内容$value"); return true }
+                        "replaced" -> {
+                            post { layout.removeView(this); layout.addView(EditText(this@PhoneTestActivity).apply { id = android.R.id.edit; setText(value) }, 1) }
+                            return true
+                        }
+                    }
+                }
+                return super.performAccessibilityAction(action, arguments)
+            }
+            override fun onInitializeAccessibilityNodeInfo(info: AccessibilityNodeInfo) {
+                super.onInitializeAccessibilityNodeInfo(info)
+                if (intent.getStringExtra("inputMode") == "decorated" && text.isNotEmpty()) info.text = "搜索, $text"
+            }
         }.apply { id = android.R.id.edit; hint = "输入文字"; contentDescription = "中文输入框"; setTextColor(0xFF111111.toInt()); setHintTextColor(0xFF666666.toInt())
+            if (intent.getStringExtra("inputMode") == "truncated") filters = arrayOf(android.text.InputFilter.LengthFilter(3))
             if (intent.getBooleanExtra("pasteInput", false)) setText("已有文字") })
         val result = TextView(this).apply { text = "等待点击"; textSize = 22f; setTextColor(0xFF111111.toInt()) }
         layout.addView(Button(this).apply { text = "确认点击"; setOnClickListener { result.text = "点击成功" } })
@@ -35,6 +62,10 @@ class PhoneTestActivity : Activity() {
             loaded.text = ""
             loaded.postDelayed({ loaded.text = "异步结果" }, 1100)
         } })
+        if (intent.getBooleanExtra("conditionFixture", false)) {
+            loaded.text = "图片,第1张,共3张"
+            layout.addView(Button(this).apply { text = "下一张"; setOnClickListener { loaded.text = "图片,第2张,共3张" } })
+        }
         layout.addView(TextView(this).apply { text = "屏幕识别 OCR English 123"; textSize = 24f; importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO; setTextColor(0xFF111111.toInt()) })
         repeat(2) { layout.addView(Button(this).apply { text = "重复目标" }) }
         layout.addView(Button(this).apply { text = "显示弹窗"; setOnClickListener { AlertDialog.Builder(this@PhoneTestActivity).setTitle("测试弹窗").setPositiveButton("关闭", null).show() } })

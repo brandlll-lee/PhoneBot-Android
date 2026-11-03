@@ -1,8 +1,6 @@
 package dev.phonebot.android
 
 import androidx.compose.foundation.layout.size
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.outlined.AccountCircle
 import androidx.compose.material3.Icon
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
@@ -46,6 +44,6 @@ internal fun providerIconResource(id: String): Int? = when (id) {
 @Composable internal fun ProviderIcon(id: String, modifier: Modifier = Modifier) {
     val resource = providerIconResource(id)
     val iconModifier = modifier.size(PhoneUi.icon).testTag("provider-icon-$id")
-    if (resource == null) Icon(Icons.Outlined.AccountCircle, null, iconModifier)
+    if (resource == null) Icon(painterResource(R.drawable.ic_ui_user_round), null, iconModifier)
     else Icon(painterResource(resource), null, iconModifier)
 }

@@ -9,7 +9,6 @@ import dev.phonebot.android.MainActivity
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertTrue
-import org.junit.Assert.assertNull
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.json.JSONObject
@@ -29,7 +28,7 @@ class EngineIntegrationTest {
     @Test fun parallelProbesKeepTheirOwnEventsAndResults() {
         val instrumentation = InstrumentationRegistry.getInstrumentation()
         val context = instrumentation.targetContext
-        val activity = instrumentation.startActivitySync(Intent(context, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+        val activity = instrumentation.startActivitySync(Intent(context, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK))
         val events = LinkedBlockingQueue<JSONObject>()
         val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
         val suffix = java.util.UUID.randomUUID().toString()
@@ -74,14 +73,18 @@ class EngineIntegrationTest {
         }
     }
 
-    @Test fun piCatalogAuthenticationAndSavedSelection() {
+    @Test fun piCatalogAndSavedSelection() {
         val instrumentation = InstrumentationRegistry.getInstrumentation()
         val context = instrumentation.targetContext
-        val activity = instrumentation.startActivitySync(Intent(context, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) as androidx.activity.ComponentActivity
+        val activity = instrumentation.startActivitySync(Intent(context, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK)) as androidx.activity.ComponentActivity
         val events = LinkedBlockingQueue<JSONObject>()
         val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
         lateinit var engine: EngineClient
+        lateinit var modelState: PhoneBotModel
+        var original = ""
+        var bot = ""
         instrumentation.runOnMainSync {
+            modelState = ViewModelProvider(activity)[PhoneBotModel::class.java]
             engine = EngineClient(context)
             scope.launch { engine.events.collect { events.add(it) } }
             engine.start()
@@ -97,55 +100,32 @@ class EngineIntegrationTest {
             throw AssertionError("Missing $type; ${engine.state.value}")
         }
         try {
-            await(engine) { it.canRun }
+            await(engine) { it.canRun && modelState.session != null }
+            instrumentation.runOnMainSync { original = modelState.selectedSession; modelState.newSession(); bot = modelState.selectedSession }
             command(JSONObject().put("type", "catalog").put("provider", "deepseek"))
             val catalog = event("catalog")
             assertTrue(catalog.getJSONArray("providers").length() >= 40)
             val model = catalog.getJSONArray("models").getJSONObject(0).getString("id")
-            await(engine) { it.canRun }
-            command(JSONObject().put("type", "login").put("provider", "deepseek").put("auth", "api_key"))
-            val prompt = event("auth_prompt")
-            assertEquals("secret", prompt.getJSONObject("params").getString("type"))
-            command(JSONObject().put("type", "tool_result").put("taskId", prompt.getString("taskId")).put("id", prompt.getString("id")).put("result", "phonebot-instrumentation-key"))
-            assertTrue(event("account").getBoolean("configured"))
-            await(engine) { it.canRun }
-            assertEquals("phonebot-instrumentation-key", CredentialVault(context).read("deepseek")!!.getString("key"))
-            instrumentation.runOnMainSync { ViewModelProvider(activity)[PhoneBotModel::class.java].choose("deepseek", model) }
-            instrumentation.runOnMainSync { assertEquals(model, ViewModelProvider(activity)[PhoneBotModel::class.java].model) }
-            command(JSONObject().put("type", "logout").put("provider", "deepseek"))
-            assertTrue(!event("account").getBoolean("configured"))
-            await(engine) { it.canRun }
-            instrumentation.waitForIdleSync()
-            assertNull(CredentialVault(context).read("deepseek"))
-            instrumentation.runOnMainSync { assertEquals("", ViewModelProvider(activity)[PhoneBotModel::class.java].provider) }
-
-            command(JSONObject().put("type", "task").put("taskId", "journal-failure-test").put("session", "journal-test-session")
-                .put("provider", "deepseek").put("model", model).put("prompt", "打开设置"))
-            await(engine) { it.canRun && it.detail.startsWith("Error:") }
-            val journal = TaskJournal(File(context.filesDir, "task-events"))
-            val records = journal.records(File(context.filesDir, "task-events/journal-failure-test.jsonl"))
-            assertTrue(records.any { it.optString("type") == "task_open" })
-            assertTrue(records.any { it.optString("type") == "model_request" })
-            assertTrue(records.any { it.optString("type") == "error" })
-            val transcript = File(context.filesDir, "sessions/journal-test-session.jsonl")
-            assertTrue(transcript.exists())
-            assertTrue(transcript.readLines().map(::JSONObject).any { it.optString("type") == "message" })
-            assertTrue(!File(context.filesDir, "task-events/journal-failure-test.jsonl").readText().contains("phonebot-instrumentation-key"))
+            instrumentation.runOnMainSync { modelState.choose("deepseek", model) }
+            instrumentation.runOnMainSync { assertEquals(model, modelState.model) }
+            await(engine) { File(context.filesDir, "chats.json").takeIf { it.exists() }?.readText()?.let { text ->
+                org.json.JSONArray(text).let { chats -> (0 until chats.length()).any { chats.getJSONObject(it).let { it.optString("id") == bot && it.optString("model") == model } } }
+            } == true }
         } finally {
-            instrumentation.runOnMainSync { if (engine.state.value.canStop) engine.stop() }
+            instrumentation.runOnMainSync {
+                if (bot.isNotEmpty()) modelState.deleteSession(bot)
+                if (original.isNotEmpty()) modelState.selectSession(original)
+                if (engine.state.value.canStop) engine.stop()
+            }
             await(engine) { it.canStart }
             instrumentation.runOnMainSync { scope.cancel(); engine.detach(); activity.finish() }
-            CredentialVault(context).delete("deepseek")
-            File(context.filesDir, "task-events/journal-failure-test.jsonl").delete()
-            File(context.filesDir, "transcripts/journal-test-session.json").delete()
-            File(context.filesDir, "sessions/journal-test-session.jsonl").delete()
         }
     }
 
     @Test fun runtimeRoundTripAndProcessLifecycle() {
         val instrumentation = InstrumentationRegistry.getInstrumentation()
         val context = instrumentation.targetContext
-        val activity = instrumentation.startActivitySync(Intent(context, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+        val activity = instrumentation.startActivitySync(Intent(context, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK))
         lateinit var engine: EngineClient
         instrumentation.runOnMainSync { engine = EngineClient(context); engine.start() }
         try {

@@ -172,6 +172,8 @@ class PhoneToolsTest {
                 panel.addView(tab)
                 observationActivity.setContentView(panel)
             }
+            instrumentation.waitForIdleSync()
+            automation.waitForIdle(500, 5000)
             screen = call("screen_read")
             val nodes = screen.getJSONArray("elements").objects()
             assertTrue(screen.toString(), nodes.size > 100)
@@ -182,7 +184,7 @@ class PhoneToolsTest {
             val existing = call("tap", JSONObject().put("element", tab.getString("id")).put("expect", JSONObject().put("text", "详情")))
             assertTrue(existing.getBoolean("executed"))
             assertTrue(existing.getBoolean("conditionBefore"))
-            assertFalse(existing.getBoolean("changed"))
+            assertFalse(existing.toString(), existing.getBoolean("changed"))
             assertFalse(existing.getBoolean("canContinue"))
             assertEquals("condition_unchanged", existing.getString("stopReason"))
             instrumentation.runOnMainSync {

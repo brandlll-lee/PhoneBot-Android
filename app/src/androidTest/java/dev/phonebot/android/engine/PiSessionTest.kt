@@ -51,14 +51,18 @@ class PiSessionTest {
         val outgoing = ParcelFileDescriptor.createPipe()
         val writer = ParcelFileDescriptor.AutoCloseOutputStream(incoming[1])
         val events = LinkedBlockingQueue<JSONObject>()
+        val credentials = java.util.concurrent.ConcurrentHashMap<String, JSONObject>()
         fun send(value: JSONObject) = synchronized(writer) { writer.write((value.toString() + "\n").toByteArray()); writer.flush() }
         val reader = Thread {
             ParcelFileDescriptor.AutoCloseInputStream(outgoing[0]).bufferedReader().useLines { lines -> lines.forEach { line ->
                 val event = JSONObject(line)
                 if (event.optString("type") == "tool") {
                     val result: Any = when (event.getString("name")) {
-                        "vault_read" -> JSONObject().put("type", "api_key").put("key", "fixture-key")
-                        "vault_list" -> JSONArray().put(JSONObject().put("providerId", "deepseek"))
+                        "vault_read" -> credentials[event.getJSONObject("params").getString("provider")] ?: JSONObject.NULL
+                        "vault_list" -> JSONArray(credentials.keys.map { JSONObject().put("providerId", it) })
+                        "vault_write" -> { credentials[event.getJSONObject("params").getString("provider")] = event.getJSONObject("params").getJSONObject("credential"); true }
+                        "vault_delete" -> { credentials.remove(event.getJSONObject("params").getString("provider")); true }
+                        "auth_prompt" -> { assertEquals("secret", event.getJSONObject("params").getString("type")); "fixture-key" }
                         "screen_read" -> JSONObject().put("kind", "full").put("snapshot", 1).put("elements", JSONArray())
                         else -> throw AssertionError(event.toString())
                     }
@@ -81,6 +85,10 @@ class PiSessionTest {
             .put("provider", "deepseek").put("model", "deepseek-flash").put("prompt", prompt))
         try {
             event("ready")
+            send(JSONObject().put("type", "login").put("provider", "deepseek").put("auth", "api_key"))
+            assertTrue(event("account").getBoolean("configured"))
+            assertEquals("fixture-key", credentials["deepseek"]!!.getString("key"))
+            event("idle")
             task("Read the current page")
             assertFalse(event("compaction_end").getBoolean("aborted"))
             assertEquals("Current page received.", event("result").getString("text"))
@@ -92,6 +100,10 @@ class PiSessionTest {
             assertTrue(entries.any { it.optJSONObject("message")?.optString("role") == "toolResult" })
             task("Continue from the previous result")
             assertEquals("Current page received.", event("result").getString("text"))
+            event("idle")
+            send(JSONObject().put("type", "logout").put("provider", "deepseek"))
+            assertFalse(event("account").getBoolean("configured"))
+            assertTrue(credentials.isEmpty())
             event("idle")
         } finally {
             send(JSONObject().put("type", "stop"))
